@@ -75,10 +75,10 @@ PORT=5000
 JWT_SECRET=livestream-betting-production-jwt-secret-key-2024-very-secure
 JWT_REFRESH_SECRET=livestream-betting-production-refresh-secret-key-2024-very-secure
 
-# CORS - Server IP
-CORS_ORIGIN=http://160.187.246.155:3000
-SOCKET_CORS_ORIGIN=http://160.187.246.155:3000
-ADMIN_CORS_ORIGIN=http://160.187.246.155:3001
+# CORS - Domain
+CORS_ORIGIN=https://devvinny.fun
+SOCKET_CORS_ORIGIN=https://devvinny.fun
+ADMIN_CORS_ORIGIN=https://admin.devvinny.fun
 EOF
 
 echo "✅ File .env đã được tạo"
@@ -122,9 +122,9 @@ cat > start.sh << 'EOF'
 cd /root/weblive
 docker-compose up -d
 echo "✅ Tất cả services đã được khởi động!"
-echo "🌐 Frontend: http://160.187.246.155:3000"
-echo "🔧 Admin: http://160.187.246.155:3001"
-echo "🔌 API: http://160.187.246.155:5000"
+echo "🌐 Frontend: https://devvinny.fun"
+echo "🔧 Admin: https://admin.devvinny.fun"
+echo "🔌 API: https://api.devvinny.fun"
 EOF
 
 # Script dừng
@@ -158,9 +158,9 @@ echo "📊 Trạng thái services:"
 docker-compose ps
 echo ""
 echo "🌐 URLs:"
-echo "Frontend: http://160.187.246.155:3000"
-echo "Admin: http://160.187.246.155:3001"
-echo "API: http://160.187.246.155:5000"
+echo "Frontend: https://devvinny.fun"
+echo "Admin: https://admin.devvinny.fun"
+echo "API: https://api.devvinny.fun"
 EOF
 
 # Script update
@@ -183,9 +183,9 @@ echo "🎉 TRIỂN KHAI HOÀN TẤT!"
 echo "======================"
 echo ""
 echo "📱 Truy cập ứng dụng:"
-echo "🌐 Frontend (Người dùng): http://160.187.246.155:3000"
-echo "🔧 Admin Dashboard: http://160.187.246.155:3001"
-echo "🔌 Backend API: http://160.187.246.155:5000"
+echo "🌐 Frontend (Người dùng): https://devvinny.fun"
+echo "🔧 Admin Dashboard: https://admin.devvinny.fun"
+echo "🔌 Backend API: https://api.devvinny.fun"
 echo ""
 echo "🛠️ Scripts quản lý:"
 echo "• ./start.sh    - Khởi động tất cả services"
