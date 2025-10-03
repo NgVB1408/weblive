@@ -6,6 +6,35 @@
 echo "🔧 SỬA LỖI BUILD FRONTEND VÀ DASHBOARD"
 echo "====================================="
 
+# Kiểm tra thư mục hiện tại và di chuyển vào thư mục dự án
+echo "📁 Kiểm tra thư mục hiện tại..."
+pwd
+ls -la
+
+# Di chuyển vào thư mục dự án nếu cần
+if [ ! -d "frontend" ] || [ ! -d "dashboard-admin" ]; then
+    echo "📁 Không tìm thấy thư mục frontend/dashboard-admin, tìm kiếm..."
+    if [ -d "/root/weblive" ]; then
+        echo "📁 Di chuyển vào /root/weblive..."
+        cd /root/weblive
+    elif [ -d "weblive" ]; then
+        echo "📁 Di chuyển vào thư mục weblive..."
+        cd weblive
+    else
+        echo "❌ Không tìm thấy thư mục dự án!"
+        echo "📋 Vui lòng chạy từ thư mục gốc của dự án hoặc clone lại:"
+        echo "git clone https://github.com/NgVB1408/weblive.git"
+        echo "cd weblive"
+        exit 1
+    fi
+fi
+
+# Kiểm tra lại sau khi di chuyển
+echo "📁 Thư mục hiện tại:"
+pwd
+echo "📁 Nội dung thư mục:"
+ls -la
+
 # Kiểm tra và tạo file cấu hình thiếu
 echo "📝 Kiểm tra và tạo file cấu hình thiếu..."
 
