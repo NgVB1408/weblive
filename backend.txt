@@ -1,0 +1,4243 @@
+🎯 Chiến lược triển khai
+Dựa trên template của bạn và yêu cầu clone dv6666.net, đây là roadmap chi tiết:
+
+📋 PHASE 1: Phân tích & Setup
+1.1 Reverse Engineering Website Mục tiêu
+# Công cụ cần thiết:
+- Chrome DevTools (phân tích UI/UX, API calls)
+- Wappalyzer (xác định tech stack)
+- Video.js / HLS.js (cho livestream player)
+
+Checklist phân tích:
+
+ Ghi chép toàn bộ user flow (đăng ký → đăng nhập → xem live → đặt cược → rút tiền)
+ Screenshot từng màn hình chính
+ Phân tích cấu trúc API (endpoints, request/response format)
+ Xác định nguồn livestream (HLS, RTMP, WebRTC?)
+ Phân tích logic đặt cược (odds calculation, timing, limits)
+ 
+1.2 Setup Project Structure
+# Clone structure theo template của bạn
+mkdir livestream-betting-platform
+cd livestream-betting-platform
+
+# Frontend
+npm create vite@latest frontend -- --template vue
+cd frontend
+npm install -D tailwindcss postcss autoprefixer
+npm install pinia vue-router axios socket.io-client video.js
+
+# Backend
+cd ../
+mkdir backend && cd backend
+npm init -y
+npm install express mongoose jsonwebtoken bcryptjs cors dotenv socket.io
+npm install -D nodemon
+
+📱 PHASE 2: Frontend Development
+2.1 Core Pages & Components
+frontend/src/
+├── pages/
+│   ├── Home.vue              # Landing page
+│   ├── Login.vue             # Đăng nhập
+│   ├── Register.vue          # Đăng ký
+│   ├── Livestream.vue        # Trang xem live + đặt cược
+│   ├── Profile.vue           # Thông tin user
+│   ├── Wallet.vue            # Nạp/rút tiền
+│   └── History.vue           # Lịch sử cược
+│
+├── components/
+│   ├── Navbar.vue
+│   ├── LivestreamPlayer.vue  # Video player (HLS/M3U8)
+│   ├── BettingPanel.vue      # Panel đặt cược
+│   ├── OddsDisplay.vue       # Hiển thị tỷ lệ
+│   ├── ChatBox.vue           # Chat realtime
+│   └── WalletCard.vue        # Card số dư
+│
+└── layouts/
+    └── MainLayout.vue        # Layout chính
+	
+2.2 Livestream Player Implementation
+<!-- LivestreamPlayer.vue -->
+<template>
+  <div class="relative aspect-video bg-black rounded-lg overflow-hidden">
+    <video
+      ref="videoPlayer"
+      class="w-full h-full"
+      controls
+      autoplay
+      muted
+    ></video>
+    
+    <!-- Overlay: Live badge, viewers count -->
+    <div class="absolute top-4 left-4 flex gap-2">
+      <span class="bg-red-600 px-3 py-1 rounded-full text-white text-sm font-bold">
+        🔴 LIVE
+      </span>
+      <span class="bg-black/70 px-3 py-1 rounded-full text-white text-sm">
+        👁️ {{ viewerCount }}
+      </span>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue';
+import Hls from 'hls.js';
+
+const videoPlayer = ref(null);
+const viewerCount = ref(0);
+
+const props = defineProps({
+  streamUrl: String,
+});
+
+onMounted(() => {
+  if (Hls.isSupported()) {
+    const hls = new Hls();
+    hls.loadSource(props.streamUrl);
+    hls.attachMedia(videoPlayer.value);
+  } else if (videoPlayer.value.canPlayType('application/vnd.apple.mpegurl')) {
+    videoPlayer.value.src = props.streamUrl;
+  }
+});
+</script>
+2.3 Betting Panel Component
+<!-- BettingPanel.vue -->
+<template>
+  <div class="bg-gray-800 rounded-lg p-4">
+    <h3 class="text-white font-bold mb-4">Đặt Cược</h3>
+    
+    <!-- Betting options -->
+    <div class="grid grid-cols-2 gap-3 mb-4">
+      <button
+        v-for="option in bettingOptions"
+        :key="option.id"
+        @click="selectOption(option)"
+        :class="[
+          'p-4 rounded-lg border-2 transition',
+          selectedOption?.id === option.id
+            ? 'border-yellow-500 bg-yellow-500/20'
+            : 'border-gray-600 hover:border-gray-500'
+        ]"
+      >
+        <div class="text-white font-semibold">{{ option.name }}</div>
+        <div class="text-yellow-400 text-lg font-bold">{{ option.odds }}x</div>
+      </button>
+    </div>
+    
+    <!-- Amount input -->
+    <div class="mb-4">
+      <label class="text-gray-400 text-sm mb-2 block">Số tiền cược</label>
+      <input
+        v-model="betAmount"
+        type="number"
+        placeholder="Nhập số tiền"
+        class="w-full bg-gray-700 text-white rounded-lg px-4 py-3"
+      />
+      
+      <!-- Quick amount buttons -->
+      <div class="flex gap-2 mt-2">
+        <button
+          v-for="quick in [10000, 50000, 100000, 500000]"
+          :key="quick"
+          @click="betAmount = quick"
+          class="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded"
+        >
+          {{ formatMoney(quick) }}
+        </button>
+      </div>
+    </div>
+    
+    <!-- Place bet button -->
+    <button
+      @click="placeBet"
+      :disabled="!canPlaceBet"
+      class="w-full bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 rounded-lg transition"
+    >
+      Đặt Cược {{ potentialWin ? `- Thắng: ${formatMoney(potentialWin)}` : '' }}
+    </button>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed } from 'vue';
+import { useBettingStore } from '@/stores/betting';
+
+const bettingStore = useBettingStore();
+
+const selectedOption = ref(null);
+const betAmount = ref('');
+
+const bettingOptions = ref([
+  { id: 1, name: 'Tài', odds: 1.95 },
+  { id: 2, name: 'Xỉu', odds: 1.95 },
+  { id: 3, name: 'Chẵn', odds: 1.90 },
+  { id: 4, name: 'Lẻ', odds: 1.90 },
+]);
+
+const potentialWin = computed(() => {
+  if (!betAmount.value || !selectedOption.value) return 0;
+  return Math.floor(betAmount.value * selectedOption.value.odds);
+});
+
+const canPlaceBet = computed(() => {
+  return selectedOption.value && betAmount.value > 0;
+});
+
+const placeBet = async () => {
+  await bettingStore.placeBet({
+    option: selectedOption.value,
+    amount: betAmount.value,
+  });
+};
+
+const formatMoney = (amount) => {
+  return new Intl.NumberFormat('vi-VN').format(amount);
+};
+</script>
+
+🔧 PHASE 3: Backend Development
+3.1 Database Schema (MongoDB)
+// models/User.js
+const mongoose = require('mongoose');
+
+const userSchema = new mongoose.Schema({
+  username: { type: String, required: true, unique: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  phoneNumber: String,
+  wallet: {
+    balance: { type: Number, default: 0 },
+    currency: { type: String, default: 'KHR' } // hoặc USD
+  },
+  isActive: { type: Boolean, default: true },
+  role: { type: String, enum: ['user', 'admin'], default: 'user' },
+  createdAt: { type: Date, default: Date.now }
+});
+
+module.exports = mongoose.model('User', userSchema);
+
+// models/Bet.js
+const betSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  matchId: { type: String, required: true },
+  betOption: { type: String, required: true }, // 'tai', 'xiu', 'chan', 'le'
+  amount: { type: Number, required: true },
+  odds: { type: Number, required: true },
+  potentialWin: { type: Number, required: true },
+  status: { 
+    type: String, 
+    enum: ['pending', 'won', 'lost', 'cancelled'],
+    default: 'pending'
+  },
+  result: String,
+  settledAt: Date,
+  createdAt: { type: Date, default: Date.now }
+});
+
+module.exports = mongoose.model('Bet', betSchema);
+
+// models/Transaction.js
+const transactionSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  type: { type: String, enum: ['deposit', 'withdrawal', 'bet', 'win'] },
+  amount: { type: Number, required: true },
+  status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' },
+  paymentMethod: String,
+  transactionId: String,
+  note: String,
+  createdAt: { type: Date, default: Date.now }
+});
+
+module.exports = mongoose.model('Transaction', transactionSchema);
+
+3.2 API Routes Structure
+// routes/auth.js
+const express = require('express');
+const router = express.Router();
+const authController = require('../controllers/authController');
+
+router.post('/register', authController.register);
+router.post('/login', authController.login);
+router.post('/refresh-token', authController.refreshToken);
+router.post('/logout', authController.logout);
+
+module.exports = router;
+// routes/bets.js
+const express = require('express');
+const router = express.Router();
+const betController = require('../controllers/betController');
+const authMiddleware = require('../middleware/auth');
+
+router.post('/place', authMiddleware, betController.placeBet);
+router.get('/history', authMiddleware, betController.getBetHistory);
+router.get('/active', authMiddleware, betController.getActiveBets);
+
+module.exports = router;
+
+// controllers/betController.js
+const Bet = require('../models/Bet');
+const User = require('../models/User');
+
+exports.placeBet = async (req, res) => {
+  try {
+    const { matchId, betOption, amount, odds } = req.body;
+    const userId = req.user.id;
+    
+    // Kiểm tra số dư
+    const user = await User.findById(userId);
+    if (user.wallet.balance < amount) {
+      return res.status(400).json({ error: 'Số dư không đủ' });
+    }
+    
+    // Tạo bet
+    const bet = new Bet({
+      userId,
+      matchId,
+      betOption,
+      amount,
+      odds,
+      potentialWin: amount * odds,
+      status: 'pending'
+    });
+    
+    await bet.save();
+    
+    // Trừ tiền
+    user.wallet.balance -= amount;
+    await user.save();
+    
+    res.json({ success: true, bet });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+🎮 PHASE 4: Real-time Features
+4.1 Socket.IO cho Live Updates
+
+// backend/socket.js
+const socketIO = require('socket.io');
+
+module.exports = (server) => {
+  const io = socketIO(server, {
+    cors: { origin: '*' }
+  });
+  
+  io.on('connection', (socket) => {
+    console.log('User connected:', socket.id);
+    
+    // Join room theo match
+    socket.on('join-match', (matchId) => {
+      socket.join(`match-${matchId}`);
+    });
+    
+    // Broadcast odds update
+    socket.on('odds-update', (data) => {
+      io.to(`match-${data.matchId}`).emit('odds-changed', data);
+    });
+    
+    // Chat messages
+    socket.on('chat-message', (message) => {
+      io.to(`match-${message.matchId}`).emit('new-message', message);
+    });
+    
+    socket.on('disconnect', () => {
+      console.log('User disconnected:', socket.id);
+    });
+  });
+  
+  return io;
+};
+
+👨‍💼 PHASE 5: Admin Dashboard
+Dashboard Features:
+
+dashboard-admin/
+├── pages/
+│   ├── Dashboard.vue        # Tổng quan (revenue, users, bets)
+│   ├── Users.vue            # Quản lý user (ban, edit balance)
+│   ├── Matches.vue          # Quản lý trận đấu/livestream
+│   ├── Bets.vue             # Theo dõi cược realtime
+│   ├── Transactions.vue     # Lịch sử giao dịch
+│   └── Settings.vue         # Cấu hình hệ thống
+
+🚀 PHASE 6: Deployment
+6.1 Docker Setup
+# docker-compose.yml
+version: '3.8'
+services:
+  mongodb:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      
+  backend:
+    build: ./backend
+    ports:
+      - "5000:5000"
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017/livestream_bet
+    depends_on:
+      - mongodb
+      
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+      
+volumes:
+  mongodb_data:
+  
+  🔐 Security Checklist
+
+ JWT với refresh token
+ Rate limiting (express-rate-limit)
+ Input validation (Joi / express-validator)
+ HTTPS/SSL certificate
+ CORS configuration
+ SQL Injection protection (MongoDB escaping)
+ XSS protection (helmet.js)
+ Password hashing (bcrypt với salt rounds >= 10)
+ 
+ 🏗️ BẮT ĐẦU XÂY DỰNG HỆ THỐNG
+PHASE 1: PROJECT INITIALIZATION
+Bước 1: Tạo cấu trúc thư mục tổng thể
+# Tạo root project
+mkdir livestream-betting-platform
+cd livestream-betting-platform
+
+# Tạo các thư mục chính
+mkdir -p frontend/src/{components,pages,layouts,router,stores,utils,assets}
+mkdir -p backend/src/{routes,controllers,models,middleware,utils,config,socket}
+mkdir -p dashboard-admin/src/{components,pages,layouts,router,stores}
+mkdir -p database
+mkdir -p docs
+
+📦 BACKEND - TRIỂN KHAI ĐẦU TIÊN
+File 1: backend/package.json
+{
+  "name": "livestream-betting-backend",
+  "version": "1.0.0",
+  "description": "Backend API for livestream betting platform",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "seed": "node src/utils/seedDatabase.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mongoose": "^8.0.3",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "socket.io": "^4.6.1",
+    "express-validator": "^7.0.1",
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "crypto": "^1.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
+
+File 2: backend/.env.example
+# Server Configuration
+NODE_ENV=development
+PORT=5000
+API_VERSION=v1
+
+# Database
+MONGO_URI=mongodb://localhost:27017/livestream_betting
+MONGO_TEST_URI=mongodb://localhost:27017/livestream_betting_test
+
+# JWT Secrets
+JWT_SECRET=your_super_secret_jwt_key_change_this_in_production_2024
+JWT_REFRESH_SECRET=your_refresh_token_secret_key_change_this_too
+JWT_EXPIRE=7d
+JWT_REFRESH_EXPIRE=30d
+
+# CORS
+FRONTEND_URL=http://localhost:3000
+ADMIN_URL=http://localhost:3001
+
+# Payment Gateway (placeholder - sẽ tích hợp sau)
+PAYMENT_API_KEY=your_payment_provider_api_key
+PAYMENT_API_SECRET=your_payment_provider_secret
+
+# Livestream
+DEFAULT_STREAM_URL=https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
+
+# Email (optional - cho reset password)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your_email@gmail.com
+SMTP_PASS=your_app_password
+
+# System Config
+MIN_BET_AMOUNT=1000
+MAX_BET_AMOUNT=10000000
+DEFAULT_CURRENCY=KHR
+
+File 3: backend/server.js
+require('dotenv').config();
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+const helmet = require('helmet');
+const morgan = require('morgan');
+const http = require('http');
+
+const app = express();
+const server = http.createServer(app);
+
+// Import routes
+const authRoutes = require('./src/routes/auth');
+const userRoutes = require('./src/routes/users');
+const betRoutes = require('./src/routes/bets');
+const matchRoutes = require('./src/routes/matches');
+const transactionRoutes = require('./src/routes/transactions');
+const walletRoutes = require('./src/routes/wallet');
+
+// Import socket handler
+const initializeSocket = require('./src/socket/socketHandler');
+
+// Middleware
+app.use(helmet());
+app.use(cors({
+  origin: [process.env.FRONTEND_URL, process.env.ADMIN_URL],
+  credentials: true
+}));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(morgan('dev'));
+
+// Database connection
+mongoose.connect(process.env.MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
+.then(() => console.log('✅ MongoDB Connected'))
+.catch((err) => console.error('❌ MongoDB Connection Error:', err));
+
+// Initialize Socket.IO
+const io = initializeSocket(server);
+app.set('io', io);
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
+// API Routes
+const API_PREFIX = `/api/${process.env.API_VERSION}`;
+
+app.use(`${API_PREFIX}/auth`, authRoutes);
+app.use(`${API_PREFIX}/users`, userRoutes);
+app.use(`${API_PREFIX}/bets`, betRoutes);
+app.use(`${API_PREFIX}/matches`, matchRoutes);
+app.use(`${API_PREFIX}/transactions`, transactionRoutes);
+app.use(`${API_PREFIX}/wallet`, walletRoutes);
+
+// 404 Handler
+app.use((req, res) => {
+  res.status(404).json({ error: 'Route not found' });
+});
+
+// Error Handler
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(err.status || 500).json({
+    error: err.message || 'Internal Server Error',
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+  });
+});
+
+// Start server
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📡 Environment: ${process.env.NODE_ENV}`);
+  console.log(`🔗 API Base: http://localhost:${PORT}${API_PREFIX}`);
+});
+
+module.exports = app;
+
+📊 DATABASE MODELS
+File 4: backend/src/models/User.js
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+
+const userSchema = new mongoose.Schema({
+  username: {
+    type: String,
+    required: [true, 'Username is required'],
+    unique: true,
+    trim: true,
+    minlength: 3,
+    maxlength: 30
+  },
+  email: {
+    type: String,
+    required: [true, 'Email is required'],
+    unique: true,
+    lowercase: true,
+    match: [/^\S+@\S+\.\S+$/, 'Please enter a valid email']
+  },
+  password: {
+    type: String,
+    required: [true, 'Password is required'],
+    minlength: 6,
+    select: false
+  },
+  phoneNumber: {
+    type: String,
+    sparse: true,
+    unique: true
+  },
+  fullName: {
+    type: String,
+    trim: true
+  },
+  avatar: {
+    type: String,
+    default: 'https://ui-avatars.com/api/?name=User'
+  },
+  wallet: {
+    balance: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    currency: {
+      type: String,
+      default: process.env.DEFAULT_CURRENCY || 'KHR'
+    },
+    totalDeposited: {
+      type: Number,
+      default: 0
+    },
+    totalWithdrawn: {
+      type: Number,
+      default: 0
+    },
+    totalWagered: {
+      type: Number,
+      default: 0
+    }
+  },
+  role: {
+    type: String,
+    enum: ['user', 'admin', 'moderator'],
+    default: 'user'
+  },
+  status: {
+    type: String,
+    enum: ['active', 'suspended', 'banned'],
+    default: 'active'
+  },
+  verification: {
+    isEmailVerified: {
+      type: Boolean,
+      default: false
+    },
+    isPhoneVerified: {
+      type: Boolean,
+      default: false
+    },
+    isKYCVerified: {
+      type: Boolean,
+      default: false
+    }
+  },
+  settings: {
+    notifications: {
+      email: { type: Boolean, default: true },
+      push: { type: Boolean, default: true }
+    },
+    twoFactorAuth: {
+      enabled: { type: Boolean, default: false },
+      secret: String
+    }
+  },
+  lastLogin: Date,
+  loginHistory: [{
+    ip: String,
+    userAgent: String,
+    timestamp: { type: Date, default: Date.now }
+  }],
+  refreshTokens: [{
+    token: String,
+    expiresAt: Date,
+    createdAt: { type: Date, default: Date.now }
+  }]
+}, {
+  timestamps: true
+});
+
+// Hash password before saving
+userSchema.pre('save', async function(next) {
+  if (!this.isModified('password')) return next();
+  
+  try {
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Compare password method
+userSchema.methods.comparePassword = async function(candidatePassword) {
+  return await bcrypt.compare(candidatePassword, this.password);
+};
+
+// Get public profile
+userSchema.methods.toPublicJSON = function() {
+  return {
+    id: this._id,
+    username: this.username,
+    email: this.email,
+    fullName: this.fullName,
+    avatar: this.avatar,
+    role: this.role,
+    wallet: {
+      balance: this.wallet.balance,
+      currency: this.wallet.currency
+    },
+    createdAt: this.createdAt
+  };
+};
+
+module.exports = mongoose.model('User', userSchema);
+
+File 5: backend/src/models/Match.js
+const mongoose = require('mongoose');
+
+const matchSchema = new mongoose.Schema({
+  title: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  description: String,
+  category: {
+    type: String,
+    enum: ['sports', 'esports', 'casino', 'lottery', 'other'],
+    default: 'sports'
+  },
+  streamUrl: {
+    type: String,
+    required: true
+  },
+  thumbnailUrl: String,
+  status: {
+    type: String,
+    enum: ['scheduled', 'live', 'paused', 'finished', 'cancelled'],
+    default: 'scheduled'
+  },
+  scheduledStartTime: {
+    type: Date,
+    required: true
+  },
+  actualStartTime: Date,
+  endTime: Date,
+  
+  // Betting configuration
+  bettingOptions: [{
+    id: String,
+    name: String,
+    odds: Number,
+    isAvailable: { type: Boolean, default: true }
+  }],
+  
+  minBetAmount: {
+    type: Number,
+    default: process.env.MIN_BET_AMOUNT || 1000
+  },
+  maxBetAmount: {
+    type: Number,
+    default: process.env.MAX_BET_AMOUNT || 10000000
+  },
+  
+  // Statistics
+  stats: {
+    totalBets: { type: Number, default: 0 },
+    totalAmount: { type: Number, default: 0 },
+    uniqueBettors: { type: Number, default: 0 },
+    currentViewers: { type: Number, default: 0 },
+    peakViewers: { type: Number, default: 0 }
+  },
+  
+  // Results
+  result: {
+    winningOption: String,
+    finalScore: String,
+    settledAt: Date
+  },
+  
+  // Admin controls
+  isFeatured: { type: Boolean, default: false },
+  isVisible: { type: Boolean, default: true },
+  
+  metadata: {
+    teams: [String],
+    tournament: String,
+    venue: String,
+    additionalInfo: mongoose.Schema.Types.Mixed
+  }
+}, {
+  timestamps: true
+});
+
+// Index for queries
+matchSchema.index({ status: 1, scheduledStartTime: -1 });
+matchSchema.index({ category: 1, status: 1 });
+
+module.exports = mongoose.model('Match', matchSchema);
+
+File 6: backend/src/models/Bet.js
+const mongoose = require('mongoose');
+
+const betSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
+  },
+  match: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Match',
+    required: true,
+    index: true
+  },
+  
+  // Bet details
+  betOption: {
+    id: { type: String, required: true },
+    name: { type: String, required: true }
+  },
+  amount: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  odds: {
+    type: Number,
+    required: true,
+    min: 1
+  },
+  potentialWin: {
+    type: Number,
+    required: true
+  },
+  
+  // Status tracking
+  status: {
+    type: String,
+    enum: ['pending', 'won', 'lost', 'cancelled', 'refunded'],
+    default: 'pending',
+    index: true
+  },
+  
+  // Settlement
+  actualWin: {
+    type: Number,
+    default: 0
+  },
+  settledAt: Date,
+  settledBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  
+  // Additional info
+  ipAddress: String,
+  userAgent: String,
+  notes: String,
+  
+  // Transaction references
+  debitTransaction: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Transaction'
+  },
+  creditTransaction: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Transaction'
+  }
+}, {
+  timestamps: true
+});
+
+// Compound indexes
+betSchema.index({ user: 1, createdAt: -1 });
+betSchema.index({ match: 1, status: 1 });
+betSchema.index({ status: 1, createdAt: -1 });
+
+// Virtual for profit/loss
+betSchema.virtual('profitLoss').get(function() {
+  if (this.status === 'won') return this.actualWin - this.amount;
+  if (this.status === 'lost') return -this.amount;
+  if (this.status === 'refunded') return 0;
+  return 0;
+});
+
+module.exports = mongoose.model('Bet', betSchema);
+
+🔐 AUTHENTICATION & MIDDLEWARE
+File 8: backend/src/middleware/auth.js
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+
+// Verify JWT token
+exports.authenticate = async (req, res, next) => {
+  try {
+    // Get token from header
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'No token provided' });
+    }
+    
+    const token = authHeader.substring(7);
+    
+    // Verify token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+    // Get user from database
+    const user = await User.findById(decoded.userId).select('-password');
+    
+    if (!user) {
+      return res.status(401).json({ error: 'User not found' });
+    }
+    
+    if (user.status !== 'active') {
+      return res.status(403).json({ error: 'Account is suspended or banned' });
+    }
+    
+    // Attach user to request
+    req.user = user;
+    next();
+  } catch (error) {
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'Token expired' });
+    }
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+    return res.status(500).json({ error: 'Authentication failed' });
+  }
+};
+
+// Check if user is admin
+exports.isAdmin = (req, res, next) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+};
+
+// Check if user is moderator or admin
+exports.isModerator = (req, res, next) => {
+  if (!['admin', 'moderator'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Moderator access required' });
+  }
+  next();
+};
+
+// Optional authentication (doesn't fail if no token)
+exports.optionalAuth = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.userId).select('-password');
+      
+      if (user && user.status === 'active') {
+        req.user = user;
+      }
+    }
+  } catch (error) {
+    // Silently fail - user remains unauthenticated
+  }
+  next();
+};
+
+File 9: backend/src/middleware/validation.js
+const { body, param, query, validationResult } = require('express-validator');
+
+// Handle validation errors
+exports.handleValidationErrors = (req, res, next) => {
+  const errors = validationResult(req);
+  
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ 
+      errors: errors.array().map(err => ({
+        field: err.param,
+        message: err.msg
+      }))
+    });
+  }
+  
+  next();
+};
+
+// Registration validation
+exports.validateRegistration = [
+  body('username')
+    .trim()
+    .isLength({ min: 3, max: 30 })
+    .withMessage('Username must be between 3 and 30 characters')
+    .matches(/^[a-zA-Z0-9_]+$/)
+    .withMessage('Username can only contain letters, numbers, and underscores'),
+  
+  body('email')
+    .trim()
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Invalid email address'),
+  
+  body('password')
+    .isLength({ min: 6 })
+    .withMessage('Password must be at least 6 characters')
+    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
+    .withMessage('Password must contain uppercase, lowercase, and number'),
+  
+  body('phoneNumber')
+    .optional()
+    .matches(/^[0-9+\-\s()]+$/)
+    .withMessage('Invalid phone number format')
+];
+
+// Login validation
+exports.validateLogin = [
+  body('username')
+    .trim()
+    .notEmpty()
+    .withMessage('Username or email is required'),
+  
+  body('password')
+    .notEmpty()
+    .withMessage('Password is required')
+];
+
+// Place bet validation
+exports.validatePlaceBet = [
+  body('matchId')
+    .notEmpty()
+    .isMongoId()
+    .withMessage('Valid match ID is required'),
+  
+  body('betOption.id')
+    .notEmpty()
+    .withMessage('Bet option is required'),
+  
+  body('amount')
+    .isNumeric()
+    .custom((value) => value >= (process.env.MIN_BET_AMOUNT || 1000))
+    .withMessage(`Minimum bet is ${process.env.MIN_BET_AMOUNT || 1000}`)
+    .custom((value) => value <= (process.env.MAX_BET_AMOUNT || 10000000))
+    .withMessage(`Maximum bet is ${process.env.MAX_BET_AMOUNT || 10000000}`)
+];
+
+// Transaction validation
+exports.validateTransaction = [
+  body('amount')
+    .isNumeric()
+    .custom((value) => value > 0)
+    .withMessage('Amount must be greater than 0'),
+  
+  body('type')
+    .isIn(['deposit', 'withdrawal'])
+    .withMessage('Invalid transaction type'),
+  
+  body('paymentMethod')
+    .notEmpty()
+    .withMessage('Payment method is required')
+];
+
+File 10: backend/src/middleware/rateLimiter.js
+const rateLimit = require('express-rate-limit');
+
+// General API rate limiter
+exports.apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Strict limiter for authentication endpoints
+exports.authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // limit each IP to 5 requests per windowMs
+  message: 'Too many login attempts, please try again later',
+  skipSuccessfulRequests: true,
+});
+
+// Betting rate limiter
+exports.betLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10, // limit each IP to 10 bets per minute
+  message: 'Too many bets placed, please slow down',
+});
+
+// Transaction rate limiter
+exports.transactionLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 20, // limit each IP to 20 transactions per hour
+  message: 'Too many transactions, please try again later',
+});
+
+🎯 CONTROLLERS - BUSINESS LOGIC
+File 11: backend/src/controllers/authController.js
+const User = require('../models/User');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+
+// Generate JWT token
+const generateToken = (userId) => {
+  return jwt.sign(
+    { userId },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRE || '7d' }
+  );
+};
+
+// Generate refresh token
+const generateRefreshToken = (userId) => {
+  return jwt.sign(
+    { userId, type: 'refresh' },
+    process.env.JWT_REFRESH_SECRET,
+    { expiresIn: process.env.JWT_REFRESH_EXPIRE || '30d' }
+  );
+};
+
+// Register new user
+exports.register = async (req, res) => {
+  try {
+    const { username, email, password, phoneNumber, fullName } = req.body;
+    
+    // Check if user already exists
+    const existingUser = await User.findOne({
+      $or: [{ email }, { username }]
+    });
+    
+    if (existingUser) {
+      return res.status(400).json({ 
+        error: 'Username or email already exists' 
+      });
+    }
+    
+    // Create new user
+    const user = new User({
+      username,
+      email,
+      password,
+      phoneNumber,
+      fullName,
+      avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(fullName || username)}&background=random`
+    });
+    
+    await user.save();
+    
+    // Generate tokens
+    const accessToken = generateToken(user._id);
+    const refreshToken = generateRefreshToken(user._id);
+    
+    // Store refresh token
+    user.refreshTokens.push({
+      token: refreshToken,
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
+    });
+    
+    user.lastLogin = new Date();
+    await user.save();
+    
+    res.status(201).json({
+      message: 'Registration successful',
+      user: user.toPublicJSON(),
+      tokens: {
+        accessToken,
+        refreshToken
+      }
+    });
+  } catch (error) {
+    console.error('Register error:', error);
+    res.status(500).json({ error: 'Registration failed' });
+  }
+};
+
+// Login user
+exports.login = async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    
+    // Find user (username or email)
+    const user = await User.findOne({
+      $or: [{ username }, { email: username }]
+    }).select('+password');
+    
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    
+    // Check account status
+    if (user.status !== 'active') {
+      return res.status(403).json({ 
+        error: `Account is ${user.status}` 
+      });
+    }
+    
+    // Verify password
+    const isPasswordValid = await user.comparePassword(password);
+    
+    if (!isPasswordValid) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    
+    // Generate tokens
+    const accessToken = generateToken(user._id);
+    const refreshToken = generateRefreshToken(user._id);
+    
+    // Store refresh token and login history
+    user.refreshTokens.push({
+      token: refreshToken,
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+    });
+    
+    user.loginHistory.push({
+      ip: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+    
+    // Keep only last 10 login records
+    if (user.loginHistory.length > 10) {
+      user.loginHistory = user.loginHistory.slice(-10);
+    }
+    
+    user.lastLogin = new Date();
+    await user.save();
+    
+    res.json({
+      message: 'Login successful',
+      user: user.toPublicJSON(),
+      tokens: {
+        accessToken,
+        refreshToken
+      }
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Login failed' });
+  }
+};
+
+// Refresh access token
+exports.refreshToken = async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    
+    if (!refreshToken) {
+      return res.status(400).json({ error: 'Refresh token required' });
+    }
+    
+    // Verify refresh token
+    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+    
+    if (decoded.type !== 'refresh') {
+      return res.status(401).json({ error: 'Invalid token type' });
+    }
+    
+    // Find user and check if refresh token exists
+    const user = await User.findById(decoded.userId);
+    
+    if (!user) {
+      return res.status(401).json({ error: 'User not found' });
+    }
+    
+    const tokenExists = user.refreshTokens.some(
+      t => t.token === refreshToken && t.expiresAt > new Date()
+    );
+    
+    if (!tokenExists) {
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
+    
+    // Generate new access token
+    const newAccessToken = generateToken(user._id);
+    
+    res.json({
+      accessToken: newAccessToken
+    });
+  } catch (error) {
+    console.error('Refresh token error:', error);
+    res.status(401).json({ error: 'Token refresh failed' });
+  }
+};
+
+// Logout user
+exports.logout = async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    
+    if (refreshToken && req.user) {
+      // Remove refresh token from database
+      await User.findByIdAndUpdate(req.user._id, {
+        $pull: { refreshTokens: { token: refresh } catch (error) {
+console.error('Update profile error:', error);
+res.status(500).json({ error: 'Failed to update profile' });
+}
+};
+// Change password
+exports.changePassword = async (req, res) => {
+try {
+const { currentPassword, newPassword } = req.body;
+const user = await User.findById(req.user._id).select('+password');
+
+// Verify current password
+const isPasswordValid = await user.comparePassword(currentPassword);
+
+if (!isPasswordValid) {
+  return res.status(401).json({ error: 'Current password is incorrect' });
+}
+
+// Update password
+user.password = newPassword;
+await user.save();
+
+// Clear all refresh tokens (force re-login on all devices)
+user.refreshTokens = [];
+await user.save();
+
+res.json({ message: 'Password changed successfully' });
+} catch (error) {
+console.error('Change password error:', error);
+res.status(500).json({ error: 'Failed to change password' });
+}
+};
+### File 12: `backend/src/controllers/betController.js`
+```javascript
+const Bet = require('../models/Bet');
+const Match = require('../models/Match');
+const User = require('../models/User');
+const Transaction = require('../models/Transaction');
+const mongoose = require('mongoose');
+
+// Place a new bet
+exports.placeBet = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
+  try {
+    const { matchId, betOption, amount } = req.body;
+    const userId = req.user._id;
+    
+    // Get match details
+    const match = await Match.findById(matchId).session(session);
+    
+    if (!match) {
+      await session.abortTransaction();
+      return res.status(404).json({ error: 'Match not found' });
+    }
+    
+    // Check match status
+    if (match.status !== 'live') {
+      await session.abortTransaction();
+      return res.status(400).json({ error: 'Match is not accepting bets' });
+    }
+    
+    // Validate bet option
+    const selectedOption = match.bettingOptions.find(
+      opt => opt.id === betOption.id
+    );
+    
+    if (!selectedOption || !selectedOption.isAvailable) {
+      await session.abortTransaction();
+      return res.status(400).json({ error: 'Invalid or unavailable bet option' });
+    }
+    
+    // Validate bet amount
+    if (amount < match.minBetAmount || amount > match.maxBetAmount) {
+      await session.abortTransaction();
+      return res.status(400).json({ 
+        error: `Bet amount must be between ${match.minBetAmount} and ${match.maxBetAmount}` 
+      });
+    }
+    
+    // Get user and check balance
+    const user = await User.findById(userId).session(session);
+    
+    if (user.wallet.balance < amount) {
+      await session.abortTransaction();
+      return res.status(400).json({ error: 'Insufficient balance' });
+    }
+    
+    // Calculate potential win
+    const potentialWin = Math.floor(amount * selectedOption.odds);
+    
+    // Create bet
+    const bet = new Bet({
+      user: userId,
+      match: matchId,
+      betOption: {
+        id: selectedOption.id,
+        name: selectedOption.name
+      },
+      amount,
+      odds: selectedOption.odds,
+      potentialWin,
+      status: 'pending',
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+    
+    await bet.save({ session });
+    
+    // Create debit transaction
+    const balanceBefore = user.wallet.balance;
+    user.wallet.balance -= amount;
+    user.wallet.totalWagered += amount;
+    const balanceAfter = user.wallet.balance;
+    
+    const transaction = new Transaction({
+      user: userId,
+      type: 'bet_debit',
+      amount: -amount,
+      status: 'completed',
+      balanceBefore,
+      balanceAfter,
+      relatedBet: bet._id,
+      relatedMatch: matchId,
+      description: `Bet placed on ${match.title}`,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+    
+    await transaction.save({ session });
+    await user.save({ session });
+    
+    // Update bet with transaction reference
+    bet.debitTransaction = transaction._id;
+    await bet.save({ session });
+    
+    // Update match statistics
+    await Match.findByIdAndUpdate(
+      matchId,
+      {
+        $inc: {
+          'stats.totalBets': 1,
+          'stats.totalAmount': amount
+        }
+      },
+      { session }
+    );
+    
+    // Commit transaction
+    await session.commitTransaction();
+    
+    // Emit socket event for real-time update
+    const io = req.app.get('io');
+    io.to(`match-${matchId}`).emit('new-bet', {
+      matchId,
+      betOption: selectedOption.name,
+      amount,
+      totalBets: match.stats.totalBets + 1
+    });
+    
+    res.status(201).json({
+      message: 'Bet placed successfully',
+      bet: {
+        id: bet._id,
+        match: match.title,
+        option: selectedOption.name,
+        amount,
+        odds: selectedOption.odds,
+        potentialWin,
+        status: bet.status,
+        createdAt: bet.createdAt
+      },
+      wallet: {
+        balance: user.wallet.balance,
+        currency: user.wallet.currency
+      }
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    console.error('Place bet error:', error);
+    res.status(500).json({ error: 'Failed to place bet' });
+  } finally {
+    session.endSession();
+  }
+};
+
+// Get user's bet history
+exports.getBetHistory = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { page = 1, limit = 20, status, matchId } = req.query;
+    
+    const query = { user: userId };
+    
+    if (status) query.status = status;
+    if (matchId) query.match = matchId;
+    
+    const skip = (page - 1) * limit;
+    
+    const [bets, total] = await Promise.all([
+      Bet.find(query)
+        .populate('match', 'title category thumbnailUrl status')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      Bet.countDocuments(query)
+    ]);
+    
+    res.json({
+      bets,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Get bet history error:', error);
+    res.status(500).json({ error: 'Failed to get bet history' });
+  }
+};
+
+// Get active bets (pending bets)
+exports.getActiveBets = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    const bets = await Bet.find({
+      user: userId,
+      status: 'pending'
+    })
+      .populate('match', 'title category status streamUrl thumbnailUrl bettingOptions')
+      .sort({ createdAt: -1 });
+    
+    res.json({ bets });
+  } catch (error) {
+    console.error('Get active bets error:', error);
+    res.status(500).json({ error: 'Failed to get active bets' });
+  }
+};
+
+// Get bet statistics
+exports.getBetStats = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    const stats = await Bet.aggregate([
+      { $match: { user: mongoose.Types.ObjectId(userId) } },
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 },
+          totalAmount: { $sum: '$amount' },
+          totalWin: { $sum: '$actualWin' }
+        }
+      }
+    ]);
+    
+    const summary = {
+      totalBets: 0,
+      totalWagered: 0,
+      totalWon: 0,
+      totalLost: 0,
+      pending: 0,
+      winRate: 0
+    };
+    
+    stats.forEach(stat => {
+      summary.totalBets += stat.count;
+      summary.totalWagered += stat.totalAmount;
+      
+      if (stat._id === 'won') {
+        summary.totalWon += stat.count;
+      } else if (stat._id === 'lost') {
+        summary.totalLost += stat.count;
+      } else if (stat._id === 'pending') {
+        summary.pending += stat.count;
+      }
+    });
+    
+    const settledBets = summary.totalWon + summary.totalLost;
+    if (settledBets > 0) {
+      summary.winRate = ((summary.totalWon / settledBets) * 100).toFixed(2);
+    }
+    
+    res.json({ stats: summary });
+  } catch (error) {
+    console.error('Get bet stats error:', error);
+    res.status(500).json({ error: 'Failed to get bet statistics' });
+  }
+};
+
+// Cancel bet (only if match not started)
+exports.cancelBet = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
+  try {
+    const { betId } = req.params;
+    const userId = req.user._id;
+    
+    const bet = await Bet.findOne({
+      _id: betId,
+      user: userId,
+      status: 'pending'
+    }).session(session);
+    
+    if (!bet) {
+      await session.abortTransaction();
+      return res.status(404).json({ error: 'Bet not found or cannot be cancelled' });
+    }
+    
+    const match = await Match.findById(bet.match).session(session);
+    
+    if (match.status !== 'scheduled') {
+      await session.abortTransaction();
+      return res.status(400).json({ error: 'Match has already started' });
+    }
+    
+    // Update bet status
+    bet.status = 'cancelled';
+    await bet.save({ session });
+    
+    // Refund user
+    const user = await User.findById(userId).session(session);
+    const balanceBefore = user.wallet.balance;
+    user.wallet.balance += bet.amount;
+    const balanceAfter = user.wallet.balance;
+    
+    const refundTransaction = new Transaction({
+      user: userId,
+      type: 'refund',
+      amount: bet.amount,
+      status: 'completed',
+      balanceBefore,
+      balanceAfter,
+      relatedBet: bet._id,
+      description: 'Bet cancelled - refund',
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+    
+    await refundTransaction.save({ session });
+    await user.save({ session });
+    
+    await session.commitTransaction();
+    
+    res.json({
+      message: 'Bet cancelled successfully',
+      refundAmount: bet.amount,
+      newBalance: user.wallet.balance
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    console.error('Cancel bet error:', error);
+    res.status(500).json({ error: 'Failed to cancel bet' });
+  } finally {
+    session.endSession();
+  }
+};
+File 13: backend/src/controllers/matchController.js
+const Match = require('../models/Match');
+const Bet = require('../models/Bet');
+
+// Get all matches with filters
+exports.getMatches = async (req, res) => {
+  try {
+    const { 
+      status, 
+      category, 
+      page = 1, 
+      limit = 20,
+      featured 
+    } = req.query;
+    
+    const query = { isVisible: true };
+    
+    if (status) query.status = status;
+    if (category) query.category = category;
+    if (featured === 'true') query.isFeatured = true;
+    
+    const skip = (page - 1) * limit;
+    
+    const [matches, total] = await Promise.all([
+      Match.find(query)
+        .sort({ isFeatured: -1, scheduledStartTime: 1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      Match.countDocuments(query)
+    ]);
+    
+    res.json({
+      matches,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Get matches error:', error);
+    res.status(500).json({ error: 'Failed to get matches' });
+  }
+};
+
+// Get single match details
+exports.getMatch = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const match = await Match.findById(id);
+    
+    if (!match) {
+      return res.status(404).json({ error: 'Match not found' });
+    }
+    
+    // Get user's bets for this match if authenticated
+    let userBets = [];
+    if (req.user) {
+      userBets = await Bet.find({
+        user: req.user._id,
+        match: id,
+        status: 'pending'
+      });
+    }
+    
+    res.json({
+      match,
+      userBets
+    });
+  } catch (error) {
+    console.error('Get match error:', error);
+    res.status(500).json({ error: 'Failed to get match' });
+  }
+};
+
+// Get live matches
+exports.getLiveMatches = async (req, res) => {
+  try {
+    const matches = await Match.find({
+      status: 'live',
+      isVisible: true
+    }).sort({ 'stats.currentViewers': -1 });
+    
+    res.json({ matches });
+  } catch (error) {
+    console.error('Get live matches error:', error);
+    res.status(500).json({ error: 'Failed to get live matches' });
+  }
+};
+
+// Get upcoming matches
+exports.getUpcomingMatches = async (req, res) => {
+  try {
+    const matches = await Match.find({
+      status: 'scheduled',
+      isVisible: true,
+      scheduledStartTime: { $gte: new Date() }
+    })
+      .sort({ scheduledStartTime: 1 })
+      .limit(10);
+    
+    res.json({ matches });
+  } catch (error) {
+    console.error('Get upcoming matches error:', error);
+    res.status(500).json({ error: 'Failed to get upcoming matches' });
+  }
+};
+
+// Admin: Create match
+exports.createMatch = async (req, res) => {
+  try {
+    const matchData = req.body;
+    
+    const match = new Match({
+      ...matchData,
+      stats: {
+        totalBets: 0,
+        totalAmount: 0,
+        uniqueBettors: 0,
+        currentViewers: 0,
+        peakViewers: 0
+      }
+    });
+    
+    await match.save();
+    
+    res.status(201).json({
+      message: 'Match created successfully',
+      match
+    });
+  } catch (error) {
+    console.error('Create match error:', error);
+    res.status(500).json({ error: 'Failed to create match' });
+  }
+};
+
+// Admin: Update match
+exports.updateMatch = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+    
+    const match = await Match.findByIdAndUpdate(
+      id,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    );
+    
+    if (!match) {
+      return res.status(404).json({ error: 'Match not found' });
+    }
+    
+    // Emit socket event for match update
+    const io = req.app.get('io');
+    io.to(`match-${id}`).emit('match-updated', match);
+    
+    res.json({
+      message: 'Match updated successfully',
+      match
+    });
+  } catch (error) {
+    console.error('Update match error:', error);
+    res.status(500).json({ error: 'Failed to update match' });
+  }
+};
+
+// Admin: Update match odds
+exports.updateOdds = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { bettingOptions } = req.body;
+    
+    const match = await Match.findByIdAndUpdate(
+      id,
+      { $set: { bettingOptions } },
+      { new: true }
+    );
+    
+    if (!match) {
+      return res.status(404).json({ error: 'Match not found' });
+    }
+    
+    // Emit real-time odds update
+    const io = req.app.get('io');
+    io.to(`match-${id}`).emit('odds-updated', { bettingOptions });
+    
+    res.json({
+      message: 'Odds updated successfully',
+      bettingOptions: match.bettingOptions
+    });
+  } catch (error) {
+    console.error('Update odds error:', error);
+    res.status(500).json({ error: 'Failed to update odds' });
+  }
+};
+
+// Admin: Start match (go live)
+exports.startMatch = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const match = await Match.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          status: 'live',
+          actualStartTime: new Date()
+        }
+      },
+      { new: true }
+    );
+    
+    if (!match) {
+      return res.status(404).json({ error: 'Match not found' });
+    }
+    
+    // Emit socket event
+    const io = req.app.get('io');
+    io.emit('match-started', { matchId: id, match });
+    
+    res.json({
+      message: 'Match started successfully',
+      match
+    });
+  } catch (error) {
+    console.error('Start match error:', error);
+    res.status(500).json({ error: 'Failed to start match' });
+  }
+};
+
+// Admin: End match and settle bets
+exports.endMatch = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
+  try {
+    const { id } = req.params;
+    const { winningOption, finalScore } = req.body;
+    
+    const match = await Match.findById(id).session(session);
+    
+    if (!match) {
+      await session.abortTransaction();
+      return res.status(404).json({ error: 'Match not found' });
+    }
+    
+    // Update match
+    match.status = 'finished';
+    match.endTime = new Date();
+    match.result = {
+      winningOption,
+      finalScore,
+      settledAt: new Date()
+    };
+    
+    await match.save({ session });
+    
+    // Get all pending bets for this match
+    const pendingBets = await Bet.find({
+      match: id,
+      status: 'pending'
+    }).session(session);
+    
+    // Settle each bet
+    for (const bet of pendingBets) {
+      const isWinner = bet.betOption.id === winningOption;
+      
+      bet.status = isWinner ? 'won' : 'lost';
+      bet.settledAt = new Date();
+      bet.settledBy = req.user._id;
+      
+      if (isWinner) {
+        bet.actualWin = bet.potentialWin;
+        
+        // Credit user wallet
+        const user = await User.findById(bet.user).session(session);
+        const balanceBefore = user.wallet.balance;
+        user.wallet.balance += bet.potentialWin;
+        const balanceAfter = user.wallet.balance;
+        
+        // Create credit transaction
+        const creditTransaction = new Transaction({
+          user: bet.user,
+          type: 'bet_credit',
+          amount: bet.potentialWin,
+          status: 'completed',
+          balanceBefore,
+          balanceAfter,
+          relatedBet: bet._id,
+          relatedMatch: id,
+          description: `Win from ${match.title}`,
+          processedBy: req.user._id,
+          processedAt: new Date()
+        });
+        
+        await creditTransaction.save({ session });
+        bet.creditTransaction = creditTransaction._id;
+        await user.save({ session });
+      } else {
+        bet.actualWin = 0;
+      }
+      
+      await bet.save({ session });
+    }
+    
+    await session.commitTransaction();
+    
+    // Emit socket event
+    const io = req.app.get('io');
+    io.to(`match-${id}`).emit('match-ended', {
+      matchId: id,
+      result: match.result
+    });
+    
+    res.json({
+      message: 'Match ended and bets settled successfully',
+      match,
+      settledBets: pendingBets.length
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    console.error('End match error:', error);
+    res.status(500).json({ error: 'Failed to end match' });
+  } finally {
+    session.endSession();
+  }
+};
+
+// Delete match (admin only)
+exports.deleteMatch = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Check if match has bets
+    const betsCount = await Bet.countDocuments({ match: id });
+    
+    if (betsCount > 0) {
+      return res.status(400).json({ 
+        error: 'Cannot delete match with existing bets' 
+      });
+    }
+    
+    await Match.findByIdAndDelete(id);
+    
+    res.json({ message: 'Match deleted successfully' });
+  } catch (error) {
+    console.error('Delete match error:', error);
+    res.status(500).json({ error: 'Failed to delete match' });
+  }
+};
+🛣️ API ROUTES SETUP
+File 14: backend/src/routes/auth.js
+const express = require('express');
+const router = express.Router();
+const authController = require('../controllers/authController');
+const { authenticate } = require('../middleware/auth');
+const { 
+  validateRegistration, 
+  validateLogin,
+  handleValidationErrors 
+} = require('../middleware/validation');
+const { authLimiter } = require('../middleware/rateLimiter');
+
+// Public routes
+router.post(
+  '/register',
+  authLimiter,
+  validateRegistration,
+  handleValidationErrors,
+  authController.register
+);
+
+router.post(
+  '/login',
+  authLimiter,
+  validateLogin,
+  handleValidationErrors,
+  authController.login
+);
+
+router.post(
+  '/refresh-token',
+  authController.refreshToken
+);
+
+// Protected routes
+router.post(
+  '/logout',
+  authenticate,
+  authController.logout
+);
+
+router.get(
+  '/profile',
+  authenticate,
+  authController.getProfile
+);
+
+router.put(
+  '/profile',
+  authenticate,
+  authController.updateProfile
+);
+
+router.post(
+  '/change-password',
+  authenticate,
+  authController.changePassword
+);
+
+module.exports = router;
+
+File 15: backend/src/routes/users.js
+const express = require('express');
+const router = express.Router();
+const userController = require('../controllers/userController');
+const { authenticate, isAdmin } = require('../middleware/auth');
+
+// Admin routes
+router.get(
+  '/',
+  authenticate,
+  isAdmin,
+  userController.getAllUsers
+);
+
+router.get(
+  '/:id',
+  authenticate,
+  isAdmin,
+  userController.getUserById
+);
+
+router.put(
+  '/:id',
+  authenticate,
+  isAdmin,
+  userController.updateUser
+);
+
+router.put(
+  '/:id/status',
+  authenticate,
+  isAdmin,
+  userController.updateUserStatus
+);
+
+router.put(
+  '/:id/wallet',
+  authenticate,
+  isAdmin,
+  userController.adjustWallet
+);
+
+router.delete(
+  '/:id',
+  authenticate,
+  isAdmin,
+  userController.deleteUser
+);
+
+router.get(
+  '/:id/activity',
+  authenticate,
+  isAdmin,
+  userController.getUserActivity
+);
+
+module.exports = router;
+
+File 16: backend/src/routes/bets.js
+const express = require('express');
+const router = express.Router();
+const betController = require('../controllers/betController');
+const { authenticate, isAdmin } = require('../middleware/auth');
+const { validatePlaceBet, handleValidationErrors } = require('../middleware/validation');
+const { betLimiter } = require('../middleware/rateLimiter');
+
+// User routes
+router.post(
+  '/place',
+  authenticate,
+  betLimiter,
+  validatePlaceBet,
+  handleValidationErrors,
+  betController.placeBet
+);
+
+router.get(
+  '/history',
+  authenticate,
+  betController.getBetHistory
+);
+
+router.get(
+  '/active',
+  authenticate,
+  betController.getActiveBets
+);
+
+router.get(
+  '/stats',
+  authenticate,
+  betController.getBetStats
+);
+
+router.delete(
+  '/:betId/cancel',
+  authenticate,
+  betController.cancelBet
+);
+
+// Admin routes
+router.get(
+  '/all',
+  authenticate,
+  isAdmin,
+  betController.getAllBets
+);
+
+router.get(
+  '/:betId',
+  authenticate,
+  betController.getBetDetails
+);
+
+module.exports = router;
+File 17: backend/src/routes/matches.js
+const express = require('express');
+const router = express.Router();
+const matchController = require('../controllers/matchController');
+const { authenticate, isAdmin, isModerator } = require('../middleware/auth');
+const { optionalAuth } = require('../middleware/auth');
+
+// Public/User routes
+router.get(
+  '/',
+  optionalAuth,
+  matchController.getMatches
+);
+
+router.get(
+  '/live',
+  optionalAuth,
+  matchController.getLiveMatches
+);
+
+router.get(
+  '/upcoming',
+  optionalAuth,
+  matchController.getUpcomingMatches
+);
+
+router.get(
+  '/:id',
+  optionalAuth,
+  matchController.getMatch
+);
+
+// Admin/Moderator routes
+router.post(
+  '/',
+  authenticate,
+  isAdmin,
+  matchController.createMatch
+);
+
+router.put(
+  '/:id',
+  authenticate,
+  isModerator,
+  matchController.updateMatch
+);
+
+router.put(
+  '/:id/odds',
+  authenticate,
+  isModerator,
+  matchController.updateOdds
+);
+
+router.post(
+  '/:id/start',
+  authenticate,
+  isModerator,
+  matchController.startMatch
+);
+
+router.post(
+  '/:id/end',
+  authenticate,
+  isModerator,
+  matchController.endMatch
+);
+
+router.delete(
+  '/:id',
+  authenticate,
+  isAdmin,
+  matchController.deleteMatch
+);
+
+module.exports = router;
+File 18: backend/src/routes/wallet.js
+const express = require('express');
+const router = express.Router();
+const walletController = require('../controllers/walletController');
+const { authenticate } = require('../middleware/auth');
+const { validateTransaction, handleValidationErrors } = require('../middleware/validation');
+const { transactionLimiter } = require('../middleware/rateLimiter');
+
+// Get wallet balance
+router.get(
+  '/balance',
+  authenticate,
+  walletController.getBalance
+);
+
+// Deposit request
+router.post(
+  '/deposit',
+  authenticate,
+  transactionLimiter,
+  validateTransaction,
+  handleValidationErrors,
+  walletController.requestDeposit
+);
+
+// Withdrawal request
+router.post(
+  '/withdraw',
+  authenticate,
+  transactionLimiter,
+  validateTransaction,
+  handleValidationErrors,
+  walletController.requestWithdrawal
+);
+
+// Get wallet transactions
+router.get(
+  '/transactions',
+  authenticate,
+  walletController.getTransactions
+);
+
+// Get transaction details
+router.get(
+  '/transactions/:id',
+  authenticate,
+  walletController.getTransactionDetails
+);
+
+module.exports = router;
+File 19: backend/src/routes/transactions.js
+const express = require('express');
+const router = express.Router();
+const transactionController = require('../controllers/transactionController');
+const { authenticate, isAdmin } = require('../middleware/auth');
+
+// Admin routes for managing transactions
+router.get(
+  '/',
+  authenticate,
+  isAdmin,
+  transactionController.getAllTransactions
+);
+
+router.get(
+  '/pending',
+  authenticate,
+  isAdmin,
+  transactionController.getPendingTransactions
+);
+
+router.put(
+  '/:id/approve',
+  authenticate,
+  isAdmin,
+  transactionController.approveTransaction
+);
+
+router.put(
+  '/:id/reject',
+  authenticate,
+  isAdmin,
+  transactionController.rejectTransaction
+);
+
+router.get(
+  '/:id',
+  authenticate,
+  isAdmin,
+  transactionController.getTransactionById
+);
+
+router.get(
+  '/stats/overview',
+  authenticate,
+  isAdmin,
+  transactionController.getTransactionStats
+);
+
+module.exports = router;
+
+💰 WALLET & TRANSACTION CONTROLLERS
+File 20: backend/src/controllers/walletController.js
+
+const User = require('../models/User');
+const Transaction = require('../models/Transaction');
+const mongoose = require('mongoose');
+const crypto = require('crypto');
+
+// Get user wallet balance
+exports.getBalance = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    
+    res.json({
+      wallet: {
+        balance: user.wallet.balance,
+        currency: user.wallet.currency,
+        totalDeposited: user.wallet.totalDeposited,
+        totalWithdrawn: user.wallet.totalWithdrawn,
+        totalWagered: user.wallet.totalWagered
+      }
+    });
+  } catch (error) {
+    console.error('Get balance error:', error);
+    res.status(500).json({ error: 'Failed to get balance' });
+  }
+};
+
+// Request deposit
+exports.requestDeposit = async (req, res) => {
+  try {
+    const { amount, paymentMethod, bankDetails } = req.body;
+    const userId = req.user._id;
+    
+    // Generate unique transaction ID
+    const transactionId = `DEP-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    
+    const user = await User.findById(userId);
+    
+    const transaction = new Transaction({
+      user: userId,
+      type: 'deposit',
+      amount,
+      currency: user.wallet.currency,
+      status: 'pending',
+      paymentMethod,
+      bankDetails,
+      externalTransactionId: transactionId,
+      balanceBefore: user.wallet.balance,
+      description: `Deposit request via ${paymentMethod}`,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+    
+    await transaction.save();
+    
+    // Send notification to admin (via socket)
+    const io = req.app.get('io');
+    io.to('admin-room').emit('new-deposit-request', {
+      transactionId: transaction._id,
+      user: {
+        username: user.username,
+        email: user.email
+      },
+      amount,
+      paymentMethod
+    });
+    
+    res.status(201).json({
+      message: 'Deposit request submitted successfully',
+      transaction: {
+        id: transaction._id,
+        transactionId,
+        amount,
+        status: transaction.status,
+        paymentMethod,
+        createdAt: transaction.createdAt
+      },
+      instructions: getDepositInstructions(paymentMethod, amount, transactionId)
+    });
+  } catch (error) {
+    console.error('Request deposit error:', error);
+    res.status(500).json({ error: 'Failed to create deposit request' });
+  }
+};
+
+// Request withdrawal
+exports.requestWithdrawal = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
+  try {
+    const { amount, paymentMethod, bankDetails } = req.body;
+    const userId = req.user._id;
+    
+    const user = await User.findById(userId).session(session);
+    
+    // Validate withdrawal amount
+    if (amount < 10000) {
+      await session.abortTransaction();
+      return res.status(400).json({ error: 'Minimum withdrawal amount is 10,000' });
+    }
+    
+    if (user.wallet.balance < amount) {
+      await session.abortTransaction();
+      return res.status(400).json({ error: 'Insufficient balance' });
+    }
+    
+    // Check for pending bets
+    const Bet = require('../models/Bet');
+    const pendingBets = await Bet.countDocuments({
+      user: userId,
+      status: 'pending'
+    }).session(session);
+    
+    if (pendingBets > 0) {
+      await session.abortTransaction();
+      return res.status(400).json({ 
+        error: 'Cannot withdraw with pending bets. Please wait for bet settlement.' 
+      });
+    }
+    
+    // Generate unique transaction ID
+    const transactionId = `WTH-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    
+    // Temporarily hold the withdrawal amount
+    const balanceBefore = user.wallet.balance;
+    user.wallet.balance -= amount;
+    const balanceAfter = user.wallet.balance;
+    
+    const transaction = new Transaction({
+      user: userId,
+      type: 'withdrawal',
+      amount: -amount,
+      currency: user.wallet.currency,
+      status: 'pending',
+      paymentMethod,
+      bankDetails,
+      externalTransactionId: transactionId,
+      balanceBefore,
+      balanceAfter,
+      description: `Withdrawal request via ${paymentMethod}`,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+    
+    await transaction.save({ session });
+    await user.save({ session });
+    
+    await session.commitTransaction();
+    
+    // Notify admin
+    const io = req.app.get('io');
+    io.to('admin-room').emit('new-withdrawal-request', {
+      transactionId: transaction._id,
+      user: {
+        username: user.username,
+        email: user.email
+      },
+      amount,
+      paymentMethod,
+      bankDetails
+    });
+    
+    res.status(201).json({
+      message: 'Withdrawal request submitted successfully',
+      transaction: {
+        id: transaction._id,
+        transactionId,
+        amount,
+        status: transaction.status,
+        paymentMethod,
+        bankDetails,
+        createdAt: transaction.createdAt
+      }
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    console.error('Request withdrawal error:', error);
+    res.status(500).json({ error: 'Failed to create withdrawal request' });
+  } finally {
+    session.endSession();
+  }
+};
+
+// Get user transactions
+exports.getTransactions = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { type, status, page = 1, limit = 20 } = req.query;
+    
+    const query = { user: userId };
+    
+    if (type) query.type = type;
+    if (status) query.status = status;
+    
+    const skip = (page - 1) * limit;
+    
+    const [transactions, total] = await Promise.all([
+      Transaction.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      Transaction.countDocuments(query)
+    ]);
+    
+    res.json({
+      transactions,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Get transactions error:', error);
+    res.status(500).json({ error: 'Failed to get transactions' });
+  }
+};
+
+// Get transaction details
+exports.getTransactionDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
+    
+    const transaction = await Transaction.findOne({
+      _id: id,
+      user: userId
+    })
+      .populate('relatedBet')
+      .populate('relatedMatch', 'title category');
+    
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    
+    res.json({ transaction });
+  } catch (error) {
+    console.error('Get transaction details error:', error);
+    res.status(500).json({ error: 'Failed to get transaction details' });
+  }
+};
+
+// Helper function for deposit instructions
+function getDepositInstructions(paymentMethod, amount, transactionId) {
+  const instructions = {
+    bank_transfer: {
+      title: 'Bank Transfer Instructions',
+      steps: [
+        'Transfer to the following bank account:',
+        'Bank: ABA Bank Cambodia',
+        'Account Number: 001234567',
+        'Account Name: LIVESTREAM BETTING CO LTD',
+        `Amount: ${amount} KHR`,
+        `Reference: ${transactionId}`,
+        'Upload proof of payment in your transaction history',
+        'Wait for admin approval (usually within 30 minutes)'
+      ]
+    },
+    e_wallet: {
+      title: 'E-Wallet Deposit Instructions',
+      steps: [
+        'Use one of the following e-wallets:',
+        'Wing: 012345678',
+        'ABA Pay: 012345678',
+        `Amount: ${amount} KHR`,
+        `Reference: ${transactionId}`,
+        'Upload screenshot of payment',
+        'Wait for admin approval'
+      ]
+    },
+    card: {
+      title: 'Card Payment',
+      steps: [
+        'You will be redirected to payment gateway',
+        'Enter your card details',
+        'Complete the payment',
+        'Your balance will be updated automatically'
+      ]
+    }
+  };
+  
+  return instructions[paymentMethod] || instructions.bank_transfer;
+}
+
+File 22: backend/src/controllers/userController.js
+const User = require('../models/User');
+const Bet = require('../models/Bet');
+const Transaction = require('../models/Transaction');
+const mongoose = require('mongoose');
+
+// Get all users (admin)
+exports.getAllUsers = async (req, res) => {
+  try {
+    const { 
+      search, 
+      status, 
+      role,
+      page = 1, 
+      limit = 50,
+      sortBy = 'createdAt',
+      sortOrder = 'desc'
+    } = req.query;
+    
+    const query = {};
+    
+    if (search) {
+      query.$or = [
+        { username: new RegExp(search, 'i') },
+        { email: new RegExp(search, 'i') },
+        { phoneNumber: new RegExp(search, 'i') }
+      ];
+    }
+    
+    if (status) query.status = status;
+    if (role) query.role = role;
+    
+    const skip = (page - 1) * limit;
+    const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
+    
+    const [users, total] = await Promise.all([
+      User.find(query)
+        .select('-password -refreshTokens')
+        .sort(sort)
+        .skip(skip)
+        .limit(parseInt(limit)),
+      User.countDocuments(query)
+    ]);
+    
+    res.json({
+      users,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Get all users error:', error);
+    res.status(500).json({ error: 'Failed to get users' });
+  }
+};
+
+// Get user by ID (admin)
+exports.getUserById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const user = await User.findById(id).select('-password -refreshTokens');
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Get user statistics
+    const [betStats, transactionStats] = await Promise.all([
+      Bet.aggregate([
+        { $match: { user: mongoose.Types.ObjectId(id) } },
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+            totalAmount: { $sum: '$amount' },
+            totalWin: { $sum: '$actualWin' }
+          }
+        }
+      ]),
+      Transaction.aggregate([
+        { 
+          $match: { 
+            user: mongoose.Types.ObjectId(id),
+            type: { $in: ['deposit', 'withdrawal'] },
+            status: 'completed'
+          } 
+        },
+        {
+          $group: {
+            _id: '$type',
+            total: { $sum: '$amount' },
+            count: { $sum: 1 }
+          }
+        }
+      ])
+    ]);
+    
+    res.json({
+      user,
+      stats: {
+        bets: betStats,
+        transactions: transactionStats
+      }
+    });
+  } catch (error) {
+    console.error('Get user by ID error:', error);
+    res.status(500).json({ error: 'Failed to get user' });
+  }
+};
+
+// Update user (admin)
+exports.updateUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { fullName, email, phoneNumber, role } = req.body;
+    
+    const updateData = {};
+    if (fullName !== undefined) updateData.fullName = fullName;
+    if (email !== undefined) updateData.email = email;
+    if (phoneNumber !== undefined) updateData.phoneNumber = phoneNumber;
+    if (role !== undefined) updateData.role = role;
+    
+    const user = await User.findByIdAndUpdate(
+      id,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    ).select('-password -refreshTokens');
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.json({
+      message: 'User updated successfully',
+      user
+    });
+  } catch (error) {
+    console.error('Update user error:', error);
+    res.status(500).json({ error: 'Failed to update user' });
+  }
+};
+
+// Update user status (admin)
+exports.updateUserStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, reason } = req.body;
+    
+    if (!['active', 'suspended', 'banned'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+    
+    const user = await User.findByIdAndUpdate(
+      id,
+      { 
+        $set: { status },
+        $push: {
+          'metadata.statusHistory': {
+            status,
+            reason,
+            changedBy: req.user._id,
+            changedAt: new Date()
+          }
+        }
+      },
+      { new: true }
+    ).select('-password -refreshTokens');
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+	// Notify user via socket
+    const io = req.app.get('io');
+    io.to(`user-${id}`).emit('account-status-changed', {
+      status,
+      reason
+    });
+    
+    res.json({
+      message: `User status updated to ${status}`,
+      user
+    });
+  } catch (error) {
+    console.error('Update user status error:', error);
+    res.status(500).json({ error: 'Failed to update user status' });
+  }
+};
+
+// Adjust wallet balance (admin)
+exports.adjustWallet = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
+  try {
+    const { id } = req.params;
+    const { amount, type, reason } = req.body;
+    
+    if (!['add', 'subtract'].includes(type)) {
+      await session.abortTransaction();
+      return res.status(400).json({ error: 'Invalid adjustment type' });
+    }
+    
+    const user = await User.findById(id).session(session);
+    
+    if (!user) {
+      await session.abortTransaction();
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const balanceBefore = user.wallet.balance;
+    const adjustmentAmount = type === 'add' ? amount : -amount;
+    
+    user.wallet.balance += adjustmentAmount;
+    
+    if (user.wallet.balance < 0) {
+      await session.abortTransaction();
+      return res.status(400).json({ error: 'Insufficient balance for adjustment' });
+    }
+    
+    const balanceAfter = user.wallet.balance;
+    
+    // Create adjustment transaction
+    const transaction = new Transaction({
+      user: id,
+      type: 'adjustment',
+      amount: adjustmentAmount,
+      status: 'completed',
+      balanceBefore,
+      balanceAfter,
+      description: reason || `Balance ${type} by admin`,
+      processedBy: req.user._id,
+      processedAt: new Date(),
+      notes: reason,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+    
+    await transaction.save({ session });
+    await user.save({ session });
+    
+    await session.commitTransaction();
+    
+    // Notify user
+    const io = req.app.get('io');
+    io.to(`user-${id}`).emit('wallet-adjusted', {
+      amount: adjustmentAmount,
+      newBalance: user.wallet.balance,
+      reason
+    });
+    
+    res.json({
+      message: 'Wallet adjusted successfully',
+      wallet: {
+        balance: user.wallet.balance,
+        currency: user.wallet.currency
+      },
+      transaction
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    console.error('Adjust wallet error:', error);
+    res.status(500).json({ error: 'Failed to adjust wallet' });
+  } finally {
+    session.endSession();
+  }
+};
+
+// Delete user (admin)
+exports.deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Check if user has pending bets
+    const pendingBets = await Bet.countDocuments({
+      user: id,
+      status: 'pending'
+    });
+    
+    if (pendingBets > 0) {
+      return res.status(400).json({ 
+        error: 'Cannot delete user with pending bets' 
+      });
+    }
+    
+    // Check if user has balance
+    const user = await User.findById(id);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    if (user.wallet.balance > 0) {
+      return res.status(400).json({ 
+        error: 'Cannot delete user with remaining balance' 
+      });
+    }
+    
+    await User.findByIdAndDelete(id);
+    
+    res.json({ message: 'User deleted successfully' });
+  } catch (error) {
+    console.error('Delete user error:', error);
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+};
+
+// Get user activity (admin)
+exports.getUserActivity = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { days = 30 } = req.query;
+    
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - parseInt(days));
+    
+    const [recentBets, recentTransactions, loginHistory] = await Promise.all([
+      Bet.find({
+        user: id,
+        createdAt: { $gte: startDate }
+      })
+        .populate('match', 'title category')
+        .sort({ createdAt: -1 })
+        .limit(20),
+      
+      Transaction.find({
+        user: id,
+        createdAt: { $gte: startDate }
+      })
+        .sort({ createdAt: -1 })
+        .limit(20),
+      
+      User.findById(id)
+        .select('loginHistory lastLogin')
+    ]);
+    
+    res.json({
+      activity: {
+        recentBets,
+        recentTransactions,
+        loginHistory: loginHistory?.loginHistory.slice(-10) || [],
+        lastLogin: loginHistory?.lastLogin
+      }
+    });
+  } catch (error) {
+    console.error('Get user activity error:', error);
+    res.status(500).json({ error: 'Failed to get user activity' });
+  }
+};
+
+🔌 SOCKET.IO IMPLEMENTATION
+File 23: backend/src/socket/socketHandler.js
+const socketIO = require('socket.io');
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+
+module.exports = (server) => {
+  const io = socketIO(server, {
+    cors: {
+      origin: [process.env.FRONTEND_URL, process.env.ADMIN_URL],
+      credentials: true
+    },
+    pingTimeout: 60000,
+    pingInterval: 25000
+  });
+  
+  // Authentication middleware for socket
+  io.use(async (socket, next) => {
+    try {
+      const token = socket.handshake.auth.token;
+      
+      if (!token) {
+        // Allow anonymous connections
+        socket.userId = null;
+        socket.isAdmin = false;
+        return next();
+      }
+      
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.userId);
+      
+      if (!user || user.status !== 'active') {
+        return next(new Error('Authentication failed'));
+      }
+      
+      socket.userId = user._id.toString();
+      socket.username = user.username;
+      socket.isAdmin = user.role === 'admin';
+      socket.role = user.role;
+      
+      next();
+    } catch (error) {
+      next(new Error('Authentication failed'));
+    }
+  });
+  
+  io.on('connection', (socket) => {
+    console.log(`✅ Socket connected: ${socket.id} | User: ${socket.username || 'Anonymous'}`);
+    
+    // Join user's personal room
+    if (socket.userId) {
+      socket.join(`user-${socket.userId}`);
+      
+      // Admin joins admin room
+      if (socket.isAdmin) {
+        socket.join('admin-room');
+        console.log(`👑 Admin joined: ${socket.username}`);
+      }
+    }
+    
+    // ==================== MATCH EVENTS ====================
+    
+    // Join match room
+    socket.on('join-match', (matchId) => {
+      socket.join(`match-${matchId}`);
+      console.log(`📺 ${socket.username || 'Anonymous'} joined match: ${matchId}`);
+      
+      // Update viewer count
+      const roomSize = io.sockets.adapter.rooms.get(`match-${matchId}`)?.size || 0;
+      io.to(`match-${matchId}`).emit('viewer-count-updated', {
+        matchId,
+        viewerCount: roomSize
+      });
+    });
+    
+    // Leave match room
+    socket.on('leave-match', (matchId) => {
+      socket.leave(`match-${matchId}`);
+      console.log(`📺 ${socket.username || 'Anonymous'} left match: ${matchId}`);
+      
+      // Update viewer count
+      const roomSize = io.sockets.adapter.rooms.get(`match-${matchId}`)?.size || 0;
+      io.to(`match-${matchId}`).emit('viewer-count-updated', {
+        matchId,
+        viewerCount: roomSize
+      });
+    });
+    
+    // ==================== CHAT EVENTS ====================
+    
+    // Chat message
+    socket.on('chat-message', async (data) => {
+      if (!socket.userId) {
+        return socket.emit('error', { message: 'Login required to chat' });
+      }
+      
+      const { matchId, message } = data;
+      
+      if (!message || message.trim().length === 0) {
+        return;
+      }
+      
+      // Rate limiting check (basic)
+      const now = Date.now();
+      if (socket.lastMessageTime && now - socket.lastMessageTime < 2000) {
+        return socket.emit('error', { message: 'Please slow down' });
+      }
+      socket.lastMessageTime = now;
+      
+      const chatMessage = {
+        id: `${socket.userId}-${now}`,
+        userId: socket.userId,
+        username: socket.username,
+        message: message.trim().substring(0, 200), // Max 200 chars
+        timestamp: new Date(),
+        matchId
+      };
+      
+      io.to(`match-${matchId}`).emit('new-chat-message', chatMessage);
+    });
+    
+    // ==================== BETTING EVENTS ====================
+    
+    // Real-time bet placed notification
+    socket.on('bet-placed', (data) => {
+      const { matchId, betOption, amount } = data;
+      
+      // Broadcast to match room (without user details for privacy)
+      io.to(`match-${matchId}`).emit('bet-notification', {
+        betOption,
+        amount,
+        timestamp: new Date()
+      });
+    });
+    
+    // ==================== ADMIN EVENTS ====================
+    
+    // Admin: Update odds in real-time
+    socket.on('admin-update-odds', (data) => {
+      if (!socket.isAdmin) return;
+      
+      const { matchId, bettingOptions } = data;
+      
+      io.to(`match-${matchId}`).emit('odds-updated', {
+        matchId,
+        bettingOptions,
+        timestamp: new Date()
+      });
+      
+      console.log(`💰 Admin ${socket.username} updated odds for match ${matchId}`);
+    });
+    
+    // Admin: Broadcast announcement
+    socket.on('admin-announcement', (data) => {
+      if (!socket.isAdmin) return;
+      
+      const { message, type, matchId } = data;
+      
+      if (matchId) {
+        io.to(`match-${matchId}`).emit('announcement', {
+          message,
+          type,
+          timestamp: new Date()
+        });
+      } else {
+        io.emit('announcement', {
+          message,
+          type,
+          timestamp: new Date()
+        });
+      }
+      
+      console.log(`📢 Admin announcement: ${message}`);
+    });
+    
+    // Admin: Match control
+    socket.on('admin-match-control', (data) => {
+      if (!socket.isAdmin) return;
+      
+      const { matchId, action } = data;
+      
+      io.to(`match-${matchId}`).emit('match-control', {
+        action,
+        timestamp: new Date()
+      });
+      
+      console.log(`🎮 Admin ${socket.username} performed ${action} on match ${matchId}`);
+    });
+    
+    // ==================== NOTIFICATION EVENTS ====================
+    
+    // Send notification to specific user
+    socket.on('send-notification', (data) => {
+      if (!socket.isAdmin) return;
+      
+      const { userId, notification } = data;
+      
+      io.to(`user-${userId}`).emit('notification', {
+        ...notification,
+        timestamp: new Date()
+      });
+    });
+    
+    // ==================== DISCONNECT ====================
+    
+    socket.on('disconnecting', () => {
+      // Update viewer counts for all joined matches
+      const rooms = Array.from(socket.rooms);
+      
+      rooms.forEach(room => {
+        if (room.startsWith('match-')) {
+          const matchId = room.replace('match-', '');
+          const roomSize = (io.sockets.adapter.rooms.get(room)?.size || 1) - 1;
+          
+          io.to(room).emit('viewer-count-updated', {
+            matchId,
+            viewerCount: roomSize
+          });
+        }
+      });
+    });
+    
+    socket.on('disconnect', (reason) => {
+      console.log(`❌ Socket disconnected: ${socket.id} | Reason: ${reason}`);
+    });
+    
+    // ==================== ERROR HANDLING ====================
+    
+    socket.on('error', (error) => {
+      console.error(`Socket error (${socket.id}):`, error);
+    });
+  });
+  
+  // Periodic cleanup of old rooms (every 5 minutes)
+  setInterval(() => {
+    const rooms = io.sockets.adapter.rooms;
+    let cleanedCount = 0;
+    
+    rooms.forEach((sockets, room) => {
+      if (room.startsWith('match-') && sockets.size === 0) {
+        io.sockets.adapter.del(room);
+        cleanedCount++;
+      }
+    });
+    
+    if (cleanedCount > 0) {
+      console.log(`🧹 Cleaned ${cleanedCount} empty match rooms`);
+    }
+  }, 5 * 60 * 1000);
+  
+  return io;
+};
+
+File 24: backend/src/socket/socketEvents.js
+// Helper functions for emitting socket events
+
+class SocketEvents {
+  constructor(io) {
+    this.io = io;
+  }
+  
+  // Emit to specific user
+  emitToUser(userId, event, data) {
+    this.io.to(`user-${userId}`).emit(event, data);
+  }
+  
+  // Emit to match room
+  emitToMatch(matchId, event, data) {
+    this.io.to(`match-${matchId}`).emit(event, data);
+  }
+  
+  // Emit to all admins
+  emitToAdmins(event, data) {
+    this.io.to('admin-room').emit(event, data);
+  }
+  
+  // Broadcast to everyone
+  broadcast(event, data) {
+    this.io.emit(event, data);
+  }
+  
+  // Notify user about bet result
+  notifyBetResult(userId, betData) {
+    this.emitToUser(userId, 'bet-result', {
+      betId: betData.id,
+      status: betData.status,
+      amount: betData.amount,
+      winAmount: betData.actualWin,
+      timestamp: new Date()
+    });
+  }
+  
+  // Notify user about transaction status
+  notifyTransactionStatus(userId, transactionData) {
+    this.emitToUser(userId, 'transaction-status', {
+      transactionId: transactionData.id,
+      type: transactionData.type,
+      status: transactionData.status,
+      amount: transactionData.amount,
+      timestamp: new Date()
+    });
+  }
+  
+  // Update match statistics in real-time
+  updateMatchStats(matchId, stats) {
+    this.emitToMatch(matchId, 'match-stats-updated', {
+      matchId,
+      stats,
+      timestamp: new Date()
+    });
+  }
+  
+  // Notify about new deposit/withdrawal request
+  notifyAdminNewTransaction(transactionData) {
+    this.emitToAdmins('new-transaction-request', {
+      transaction: transactionData,
+      timestamp: new Date()
+    });
+  }
+  
+  // Live notification for all users
+  sendSystemNotification(message, type = 'info') {
+    this.broadcast('system-notification', {
+      message,
+      type,
+      timestamp: new Date()
+    });
+  }
+}
+
+module.exports = SocketEvents;
+
+
+File 25: backend/src/utils/seedDatabase.js
+require('dotenv').config();
+const mongoose = require('mongoose');
+const User = require('../models/User');
+const Match = require('../models/Match');
+const bcrypt = require('bcryptjs');
+
+const seedDatabase = async () => {
+  try {
+    console.log('🌱 Starting database seeding...');
+    
+    await mongoose.connect(process.env.MONGO_URI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
+    
+    console.log('✅ Connected to MongoDB');
+    
+    // Clear existing data
+    await User.deleteMany({});
+    await Match.deleteMany({});
+    
+    console.log('🗑️  Cleared existing data');
+    
+    // Create admin user
+    const adminPassword = await bcrypt.hash('Admin@123', 10);
+    const admin = await User.create({
+      username: 'admin',
+      email: 'admin@livestream-betting.com',
+      password: adminPassword,
+      fullName: 'System Administrator',
+      role: 'admin',
+      status: 'active',
+      wallet: {
+        balance: 0,
+        currency: 'KHR'
+      },
+      verification: {
+        isEmailVerified: true,
+        isPhoneVerified: true,
+        isKYCVerified: true
+      }
+    });
+    
+    console.log('👑 Admin user created:', admin.username);
+    
+    // Create test users
+    const testUsers = [];
+    for (let i = 1; i <= 5; i++) {
+      const password = await bcrypt.hash('User@123', 10);
+      const user = await User.create({
+        username: `user${i}`,
+        email: `user${i}@test.com`,
+        password,
+        fullName: `Test User ${i}`,
+        phoneNumber: `01234567${i}`,
+        role: 'user',
+        status: 'active',
+        wallet: {
+          balance: 100000 * i,
+          currency: 'KHR',
+          totalDeposited: 100000 * i
+        }
+      });
+      testUsers.push(user);
+    }
+    
+    console.log(`👥 Created ${testUsers.length} test users`);
+    
+    // Create sample matches
+    const matches = [
+      {
+        title: 'Premier League: Manchester United vs Liverpool',
+        description: 'Top clash in English Premier League',
+        category: 'sports',
+        streamUrl: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+        thumbnailUrl: 'https://picsum.photos/800/450?random=1',
+        status: 'live',
+        scheduledStartTime: new Date(),
+        actualStartTime: new Date(),
+        bettingOptions: [
+          { id: 'home', name: 'Manchester United', odds: 2.10, isAvailable: true },
+          { id: 'draw', name: 'Draw', odds: 3.20, isAvailable: true },
+          { id: 'away', name: 'Liverpool', odds: 2.80, isAvailable: true }
+        ],
+        minBetAmount: 1000,
+        maxBetAmount: 5000000,
+        isFeatured: true,
+        isVisible: true,
+        stats: {
+          totalBets: 0,
+          totalAmount: 0,
+          uniqueBettors: 0,
+          currentViewers: 0,
+          peakViewers: 0
+        }
+      },
+      {
+        title: 'NBA: Lakers vs Warriors',
+        description: 'Western Conference showdown',
+        category: 'sports',
+        streamUrl: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+        thumbnailUrl: 'https://picsum.photos/800/450?random=2',
+        status: 'scheduled',
+        scheduledStartTime: new Date(Date.now() + 2 * 60 * 60 * 1000),
+        bettingOptions: [
+          { id: 'lakers', name: 'Lakers Win', odds: 1.85, isAvailable: true },
+          { id: 'warriors', name: 'Warriors Win', odds: 1.95, isAvailable: true }
+        ],
+        minBetAmount: 1000,
+        maxBetAmount: 10000000,
+        isFeatured: true,
+        isVisible: true
+      },
+      {
+        title: 'Casino Live: Baccarat VIP Table',
+        description: 'High stakes baccarat game',
+        category: 'casino',
+        streamUrl: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+        thumbnailUrl: 'https://picsum.photos/800/450?random=3',
+        status: 'live',
+        scheduledStartTime: new Date(),
+        actualStartTime: new Date(),
+        bettingOptions: [
+          { id: 'player', name: 'Player', odds: 1.95, isAvailable: true },
+          { id: 'banker', name: 'Banker', odds: 1.90, isAvailable: true },
+          { id: 'tie', name: 'Tie', odds: 8.00, isAvailable: true }
+        ],
+        minBetAmount: 5000,
+        maxBetAmount: 20000000,
+        isFeatured: false,
+        isVisible: true
+      },
+      {
+        title: 'LoL Esports: T1 vs Gen.G',
+        description: 'LCK Championship Finals',
+        category: 'esports',
+        streamUrl: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+        thumbnailUrl: 'https://picsum.photos/800/450?random=4',
+        status: 'scheduled',
+        scheduledStartTime: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        bettingOptions: [
+          { id: 't1', name: 'T1 Win', odds: 1.75, isAvailable: true },
+          { id: 'geng', name: 'Gen.G Win', odds: 2.05, isAvailable: true }
+        ],
+        minBetAmount: 1000,
+        maxBetAmount: 3000000,
+        isFeatured: true,
+        isVisible: true
+      },
+      {
+        title: 'Dice Game: High/Low',
+        description: 'Fast-paced dice betting game',
+        category: 'casino',
+        streamUrl: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+        thumbnailUrl: 'https://picsum.photos/800/450?random=5',
+        status: 'live',
+        scheduledStartTime: new Date(),
+        actualStartTime: new Date(),
+        bettingOptions: [
+          { id: 'high', name: 'High (8-12)', odds: 1.90, isAvailable: true },
+          { id: 'low', name: 'Low (3-7)', odds: 1.90, isAvailable: true },
+          { id: 'exact', name: 'Exact 7', odds: 5.00, isAvailable: true }
+        ],
+        minBetAmount: 500,
+        maxBetAmount: 1000000,
+        isFeatured: false,
+        isVisible: true
+      }
+    ];
+    
+    const createdMatches = await Match.insertMany(matches);
+    console.log(`🎮 Created ${createdMatches.length} sample matches`);
+    
+    console.log('\n✨ Database seeding completed successfully!');
+    console.log('\n📋 Login Credentials:');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('Admin:');
+    console.log('  Username: admin');
+    console.log('  Password: Admin@123');
+    console.log('\nTest Users:');
+    console.log('  Username: user1, user2, user3, user4, user5');
+    console.log('  Password: User@123');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+    
+    process.exit(0);
+  } catch (error) {
+    console.error('❌ Seeding error:', error);
+    process.exit(1);
+  }
+};
+
+seedDatabase();
+
+File 26: backend/src/config/database.js
+const mongoose = require('mongoose');
+
+const connectDatabase = async () => {
+  try {
+    const options = {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+    };
+    
+    await mongoose.connect(process.env.MONGO_URI, options);
+    
+    console.log('✅ MongoDB Connected Successfully');
+    console.log(`📊 Database: ${mongoose.connection.name}`);
+    
+    // Connection events
+    mongoose.connection.on('error', (err) => {
+      console.error('❌ MongoDB connection error:', err);
+    });
+    
+    mongoose.connection.on('disconnected', () => {
+      console.log('⚠️  MongoDB disconnected');
+    });
+    
+    mongoose.connection.on('reconnected', () => {
+      console.log('🔄 MongoDB reconnected');
+    });
+    
+    // Graceful shutdown
+    process.on('SIGINT', async () => {
+      await mongoose.connection.close();
+      console.log('🔚 MongoDB connection closed through app termination');
+      process.exit(0);
+    });
+    
+  } catch (error) {
+    console.error('❌ MongoDB connection failed:', error.message);
+    process.exit(1);
+  }
+};
+
+module.exports = connectDatabase;
+
+📝 ADDITIONAL UTILITIES
+File 27: backend/src/utils/helpers.js
+const crypto = require('crypto');
+
+// Generate unique transaction ID
+exports.generateTransactionId = (prefix = 'TXN') => {
+  const timestamp = Date.now();
+  const random = crypto.randomBytes(4).toString('hex').toUpperCase();
+  return `${prefix}-${timestamp}-${random}`;
+};
+
+// Format currency
+exports.formatCurrency = (amount, currency = 'KHR') => {
+  return new Intl.NumberFormat('km-KH', {
+    style: 'currency',
+    currency: currency
+  }).format(amount);
+};
+
+// Calculate pagination
+exports.getPagination = (page, limit, total) => {
+  const currentPage = parseInt(page) || 1;
+  const perPage = parseInt(limit) || 20;
+  const totalPages = Math.ceil(total / perPage);
+  
+  return {
+    total,
+    page: currentPage,
+    limit: perPage,
+    pages: totalPages,
+    hasNext: currentPage < totalPages,
+    hasPrev: currentPage > 1
+  };
+};
+
+// Sanitize user input
+exports.sanitizeInput = (input) => {
+  if (typeof input !== 'string') return input;
+  
+  return input
+    .trim()
+    .replace(/[<>]/g, '')
+    .substring(0, 1000);
+};
+
+// Generate random string
+exports.generateRandomString = (length = 32) => {
+  return crypto.randomBytes(length).toString('hex');
+};
+
+// Hash data
+exports.hashData = (data) => {
+  return crypto.createHash('sha256').update(data).digest('hex');
+};
+
+// Check if date is today
+exports.isToday = (date) => {
+  const today = new Date();
+  const checkDate = new Date(date);
+  
+  return checkDate.getDate() === today.getDate() &&
+    checkDate.getMonth() === today.getMonth() &&
+    checkDate.getFullYear() === today.getFullYear();
+};
+
+// Get date range
+exports.getDateRange = (days) => {
+  const endDate = new Date();
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  
+  return { startDate, endDate };
+};
+
+// Sleep/delay function
+exports.sleep = (ms) => {
+  return new Promise(resolve => setTimeout(resolve, ms));
+};
+
+File 28: backend/src/utils/logger.js
+const fs = require('fs');
+const path = require('path');
+
+const logsDir = path.join(__dirname, '../../logs');
+
+// Create logs directory if it doesn't exist
+if (!fs.existsSync(logsDir)) {
+  fs.mkdirSync(logsDir, { recursive: true });
+}
+
+const getLogFileName = () => {
+  const date = new Date().toISOString().split('T')[0];
+  return path.join(logsDir, `app-${date}.log`);
+};
+
+const formatLog = (level, message, meta = {}) => {
+  return JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+    ...meta
+  }) + '\n';
+};
+
+class Logger {
+  static info(message, meta = {}) {
+    const log = formatLog('INFO', message, meta);
+    console.log(`ℹ️  ${message}`, meta);
+    fs.appendFileSync(getLogFileName(), log);
+  }
+  
+  static error(message, error = {}, meta = {}) {
+    const log = formatLog('ERROR', message, {
+      ...meta,
+      error: error.message,
+      stack: error.stack
+    });
+    console.error(`❌ ${message}`, error);
+    fs.appendFileSync(getLogFileName(), log);
+  }
+  
+  static warn(message, meta = {}) {
+    const log = formatLog('WARN', message, meta);
+    console.warn(`⚠️  ${message}`, meta);
+    fs.appendFileSync(getLogFileName(), log);
+  }
+  
+  static debug(message, meta = {}) {
+    if (process.env.NODE_ENV === 'development') {
+      const log = formatLog('DEBUG', message, meta);
+      console.debug(`🐛 ${message}`, meta);
+      fs.appendFileSync(getLogFileName(), log);
+    }
+  }
+}
+
+module.exports = Logger;
+
+📜 FINAL BACKEND FILES
+File 29: backend/.env
+# Copy from .env.example and fill in your values
+NODE_ENV=development
+PORT=5000
+API_VERSION=v1
+
+MONGO_URI=mongodb://localhost:27017/livestream_betting
+
+JWT_SECRET=your_super_secret_jwt_key_change_this_in_production_2024
+JWT_REFRESH_SECRET=your_refresh_token_secret_key_change_this_too
+JWT_EXPIRE=7d
+JWT_REFRESH_EXPIRE=30d
+
+FRONTEND_URL=http://localhost:3000
+ADMIN_URL=http://localhost:3001
+
+DEFAULT_STREAM_URL=https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
+
+MIN_BET_AMOUNT=1000
+MAX_BET_AMOUNT=10000000
+DEFAULT_CURRENCY=KHR
+
+### File 30: `backend/.gitignore`
+Dependencies
+node_modules/
+package-lock.json
+Environment variables
+.env
+.env.local
+.env.*.local
+Logs
+logs/
+.log
+npm-debug.log
+yarn-debug.log*
+yarn-error.log*
+Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+Directory for instrumented libs generated by jscoverage/JSCover
+lib-cov
+Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+nyc test coverage
+.nyc_output
+Grunt intermediate storage
+.grunt
+Bower dependency directory
+bower_components
+node-waf configuration
+.lock-wscript
+Compiled binary addons
+build/Release
+Dependency directories
+jspm_packages/
+TypeScript cache
+*.tsbuildinfo
+Optional npm cache directory
+.npm
+Optional eslint cache
+.eslintcache
+Optional REPL history
+.node_repl_history
+Output of 'npm pack'
+*.tgz
+Yarn Integrity file
+.yarn-integrity
+parcel-bundler cache
+.cache
+.parcel-cache
+Next.js build output
+.next
+out
+Nuxt.js build / generate output
+.nuxt
+dist
+Gatsby files
+.cache/
+vuepress build output
+.vuepress/dist
+Serverless directories
+.serverless/
+FuseBox cache
+.fusebox/
+DynamoDB Local files
+.dynamodb/
+TernJS port file
+.tern-port
+Stores VSCode versions used for testing VSCode extensions
+.vscode-test
+macOS
+.DS_Store
+IDE
+.idea/
+*.swp
+*.swo
+*~
+.vscode/
+
+### File 31: `backend/README.md`
+```markdown
+# Livestream Betting Platform - Backend API
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Node.js >= 16.x
+- MongoDB >= 5.x
+- npm or yarn
+
+### Installation
+
+1. Install dependencies:
+```bash
+npm install
+
+2. Setup environment variables:
+cp .env.example .env
+# Edit .env with your configuration
+
+3. Start MongoDB (if local):
+mongod
+
+4.Seed database with sample data:
+
+npm run seed
+
+5. Start development server:
+
+bashnpm run dev
+Server will run on http://localhost:5000
+
+📡 API Endpoints
+Authentication
+
+POST /api/v1/auth/register - Register new user
+POST /api/v1/auth/login - Login user
+POST /api/v1/auth/refresh-token - Refresh access token
+POST /api/v1/auth/logout - Logout user
+GET /api/v1/auth/profile - Get current user profile
+PUT /api/v1/auth/profile - Update user profile
+POST /api/v1/auth/change-password - Change password
+
+Matches
+
+GET /api/v1/matches - Get all matches (with filters)
+GET /api/v1/matches/live - Get live matches
+GET /api/v1/matches/upcoming - Get upcoming matches
+GET /api/v1/matches/:id - Get match details
+POST /api/v1/matches - Create match (admin)
+PUT /api/v1/matches/:id - Update match (admin)
+PUT /api/v1/matches/:id/odds - Update odds (admin)
+POST /api/v1/matches/:id/start - Start match (admin)
+POST /api/v1/matches/:id/end - End match & settle bets (admin)
+DELETE /api/v1/matches/:id - Delete match (admin)
+
+Betting
+
+POST /api/v1/bets/place - Place a bet
+GET /api/v1/bets/history - Get bet history
+GET /api/v1/bets/active - Get active/pending bets
+GET /api/v1/bets/stats - Get betting statistics
+DELETE /api/v1/bets/:betId/cancel - Cancel bet (before match starts)
+GET /api/v1/bets/all - Get all bets (admin)
+
+Wallet
+
+GET /api/v1/wallet/balance - Get wallet balance
+POST /api/v1/wallet/deposit - Request deposit
+POST /api/v1/wallet/withdraw - Request withdrawal
+GET /api/v1/wallet/transactions - Get transaction history
+GET /api/v1/wallet/transactions/:id - Get transaction details
+
+Transactions (Admin)
+
+GET /api/v1/transactions - Get all transactions
+GET /api/v1/transactions/pending - Get pending transactions
+PUT /api/v1/transactions/:id/approve - Approve transaction
+PUT /api/v1/transactions/:id/reject - Reject transaction
+GET /api/v1/transactions/:id - Get transaction by ID
+GET /api/v1/transactions/stats/overview - Get statistics
+
+Users (Admin)
+
+GET /api/v1/users - Get all users
+GET /api/v1/users/:id - Get user by ID
+PUT /api/v1/users/:id - Update user
+PUT /api/v1/users/:id/status - Update user status (suspend/ban)
+PUT /api/v1/users/:id/wallet - Adjust wallet balance
+DELETE /api/v1/users/:id - Delete user
+GET /api/v1/users/:id/activity - Get user activity
+
+
+🔌 WebSocket Events
+Client → Server
+Match Events:
+
+join-match - Join match room
+leave-match - Leave match room
+
+Chat Events:
+
+chat-message - Send chat message
+
+Betting Events:
+
+bet-placed - Notify bet placement
+
+Admin Events:
+
+admin-update-odds - Update odds in real-time
+admin-announcement - Broadcast announcement
+admin-match-control - Control match (start/pause/end)
+send-notification - Send notification to user
+
+Server → Client
+Match Events:
+
+viewer-count-updated - Viewer count changed
+match-updated - Match data updated
+match-started - Match started
+match-ended - Match ended
+match-stats-updated - Statistics updated
+
+Betting Events:
+
+odds-updated - Odds changed
+bet-notification - New bet placed (anonymized)
+bet-result - Bet result (win/lose)
+
+Transaction Events:
+
+transaction-approved - Transaction approved
+transaction-rejected - Transaction rejected
+wallet-adjusted - Wallet balance adjusted
+
+Chat Events:
+
+new-chat-message - New chat message
+
+System Events:
+
+announcement - System announcement
+notification - Personal notification
+system-notification - System-wide notification
+
+
+📊 Database Models
+User
+
+Authentication & profile info
+Wallet (balance, deposits, withdrawals)
+Role (user/admin/moderator)
+Status (active/suspended/banned)
+Login history
+
+Match
+
+Match details & metadata
+Livestream URL
+Betting options & odds
+Statistics (bets, viewers)
+Status (scheduled/live/finished)
+
+Bet
+
+User reference
+Match reference
+Bet option & amount
+Odds & potential win
+Status (pending/won/lost/cancelled)
+Settlement details
+
+Transaction
+
+User reference
+Type (deposit/withdrawal/bet/win/refund)
+Amount & currency
+Payment method & details
+Status (pending/completed/failed)
+Related bet/match references
+
+
+🔐 Security Features
+
+JWT authentication with refresh tokens
+Password hashing with bcrypt (10 rounds)
+Rate limiting on sensitive endpoints
+Input validation & sanitization
+CORS configuration
+Helmet.js security headers
+MongoDB injection protection
+Role-based access control (RBAC)
+
+
+🧪 Testing
+Manual Testing with Sample Data
+After running npm run seed, you can login with:
+Admin Account:
+
+Username: admin
+Password: Admin@123
+
+Test Users:
+
+Username: user1, user2, user3, user4, user5
+Password: User@123
+
+Example API Calls
+
+ POST http://localhost:5000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"user1","password":"User@123"}'
+Get Live Matches:
+bashcurl http://localhost:5000/api/v1/matches/live
+Place Bet:
+bashcurl -X POST http://localhost:5000/api/v1/bets/place \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{
+    "matchId": "MATCH_ID",
+    "betOption": {"id":"home","name":"Team A"},
+    "amount": 10000
+  }'
+
+📦 Production Deployment
+Environment Variables
+Make sure to set production values for:
+
+NODE_ENV=production
+MONGO_URI (production database)
+JWT_SECRET (strong random string)
+FRONTEND_URL (production frontend URL)
+
+PM2 Deployment
+bashnpm install -g pm2
+pm2 start server.js --name livestream-betting-api
+pm2 save
+pm2 startup
+Docker Deployment
+bashdocker build -t livestream-betting-api .
+docker run -p 5000:5000 --env-file .env livestream-betting-api
+
+📝 Scripts
+
+npm start - Start production server
+npm run dev - Start development server with nodemon
+npm run seed - Seed database with sample data
+
+
+🐛 Troubleshooting
+MongoDB Connection Issues
+bash# Check if MongoDB is running
+mongosh
+
+# Check MongoDB URI in .env file
+# Make sure port 27017 is not blocked
+Port Already in Use
+bash# Kill process using port 5000
+lsof -ti:5000 | xargs kill -9
+
+# Or change PORT in .env file
+JWT Token Errors
+
+Make sure JWT_SECRET is set in .env
+Check token expiration settings
+Verify Bearer token format in Authorization header
+
+
+🤝 Support
+For issues or questions, contact the development team.
+
+---
+
+## 🎉 BACKEND HOÀN THÀNH!
+
+### ✅ Tổng kết Backend đã xây dựng:
+
+#### 📂 **File Structure đã tạo:**
+backend/
+├── src/
+│   ├── controllers/
+│   │   ├── authController.js ✅
+│   │   ├── betController.js ✅
+│   │   ├── matchController.js ✅
+│   │   ├── walletController.js ✅
+│   │   ├── transactionController.js ✅
+│   │   └── userController.js ✅
+│   │
+│   ├── models/
+│   │   ├── User.js ✅
+│   │   ├── Match.js ✅
+│   │   ├── Bet.js ✅
+│   │   └── Transaction.js ✅
+│   │
+│   ├── routes/
+│   │   ├── auth.js ✅
+│   │   ├── bets.js ✅
+│   │   ├── matches.js ✅
+│   │   ├── wallet.js ✅
+│   │   ├── transactions.js ✅
+│   │   └── users.js ✅
+│   │
+│   ├── middleware/
+│   │   ├── auth.js ✅
+│   │   ├── validation.js ✅
+│   │   └── rateLimiter.js ✅
+│   │
+│   ├── socket/
+│   │   ├── socketHandler.js ✅
+│   │   └── socketEvents.js ✅
+│   │
+│   ├── utils/
+│   │   ├── helpers.js ✅
+│   │   ├── logger.js ✅
+│   │   └── seedDatabase.js ✅
+│   │
+│   └── config/
+│       └── database.js ✅
+│
+├── server.js ✅
+├── package.json ✅
+├── .env.example ✅
+├── .env ✅
+├── .gitignore ✅
+└── README.md ✅
+
+#### 🎯 **Tính năng đã hoàn thành:**
+
+1. **Authentication & Authorization** ✅
+   - JWT với refresh token
+   - Role-based access control (User/Admin/Moderator)
+   - Password hashing với bcrypt
+   - Login history tracking
+
+2. **Match Management** ✅
+   - CRUD operations cho matches
+   - Real-time odds updates
+   - Match status control (scheduled/live/finished)
+   - Live viewer tracking
+   - Featured matches
+
+3. **Betting System** ✅
+   - Place bets với validation
+   - Bet history & statistics
+   - Auto settlement khi match kết thúc
+   - Cancel bet (trước khi match bắt đầu)
+   - Real-time bet notifications
+
+4. **Wallet & Transactions** ✅
+   - Deposit/Withdrawal requests
+   - Transaction approval workflow (admin)
+   - Balance tracking
+   - Transaction history
+   - Wallet adjustment (admin)
+
+5. **WebSocket (Socket.IO)** ✅
+   - Real-time match updates
+   - Live chat trong match rooms
+   - Viewer count tracking
+   - Admin controls
+   - Push notifications
+
+6. **Admin Dashboard APIs** ✅
+   - User management
+   - Transaction approval/rejection
+   - Match control
+   - Statistics & reports
+   - Wallet adjustments
+
+7. **Security** ✅
+   - Rate limiting
+   - Input validation
+   - CORS protection
+   - Helmet.js security headers
+   - MongoDB injection prevention
+
+8. **Database** ✅
+   - MongoDB schemas với indexes
+   - Transaction support (ACID)
+   - Seed data script
+   - Connection pooling
+
+---
+
+## 🚀 Bước tiếp theo:
+
+**Boss, Backend đã hoàn thành! Bây giờ tôi có thể:**
+
+1. **🎨 Xây dựng Frontend (Vue 3 + Tailwind)**
+   - Setup project structure
+   - Create UI components
+   - Implement livestream player
+   - Build betting interface
+   - User dashboard
+   
+2. **👨‍💼 Xây dựng Admin Dashboard**
+   - Admin panel UI
+   - User management interface
+   - Transaction approval system
+   - Match management
+   - Analytics & reports
+
+3. **🐳 Setup Docker & Deployment**
+   - Docker Compose configuration
+   - Nginx reverse proxy
+   - Production environment setup
+
+4. **🧪 Testing & Documentation**
+   - API testing
+   - Integration tests
+   - Complete API documentation
+
+
+		
+		

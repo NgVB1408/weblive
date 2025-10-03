@@ -1,0 +1,1614 @@
+🎨 FRONTEND - VUE 3 + TAILWIND CSS
+📦 PHASE 1: PROJECT SETUP
+File 1: frontend/package.json
+{
+  "name": "livestream-betting-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs --fix --ignore-path .gitignore"
+  },
+  "dependencies": {
+    "vue": "^3.4.15",
+    "vue-router": "^4.2.5",
+    "pinia": "^2.1.7",
+    "axios": "^1.6.5",
+    "socket.io-client": "^4.6.1",
+    "hls.js": "^1.5.1",
+    "video.js": "^8.9.0",
+    "sweetalert2": "^11.10.3",
+    "dayjs": "^1.11.10",
+    "vue-toastification": "^2.0.0-rc.5",
+    "@vueuse/core": "^10.7.2",
+    "lodash-es": "^4.17.21"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.3",
+    "vite": "^5.0.11",
+    "tailwindcss": "^3.4.1",
+    "postcss": "^8.4.33",
+    "autoprefixer": "^10.4.17",
+    "eslint": "^8.56.0",
+    "eslint-plugin-vue": "^9.20.1"
+  }
+}
+File 2: frontend/vite.config.js
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+import path from 'path'
+
+export default defineConfig({
+  plugins: [vue()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
+  server: {
+    port: 3000,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+      },
+      '/socket.io': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+        ws: true,
+      },
+    },
+  },
+})
+File 3: frontend/tailwind.config.js
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{vue,js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        primary: {
+          50: '#fef3c7',
+          100: '#fde68a',
+          200: '#fcd34d',
+          300: '#fbbf24',
+          400: '#f59e0b',
+          500: '#d97706',
+          600: '#b45309',
+          700: '#92400e',
+          800: '#78350f',
+          900: '#451a03',
+        },
+        dark: {
+          50: '#f9fafb',
+          100: '#f3f4f6',
+          200: '#e5e7eb',
+          300: '#d1d5db',
+          400: '#9ca3af',
+          500: '#6b7280',
+          600: '#4b5563',
+          700: '#374151',
+          800: '#1f2937',
+          900: '#111827',
+          950: '#030712',
+        }
+      },
+      fontFamily: {
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+      },
+      boxShadow: {
+        'glow': '0 0 20px rgba(251, 191, 36, 0.3)',
+        'glow-lg': '0 0 40px rgba(251, 191, 36, 0.4)',
+      },
+      animation: {
+        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'bounce-slow': 'bounce 2s infinite',
+        'spin-slow': 'spin 3s linear infinite',
+      }
+    },
+  },
+  plugins: [],
+}
+
+File 4: frontend/postcss.config.js
+export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}
+File 5: frontend/index.html
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/svg+xml" href="/logo.svg">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Livestream Betting Platform</title>
+    
+    <!-- Preconnect to API -->
+    <link rel="preconnect" href="http://localhost:5000">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
+
+File 6: frontend/.env.example
+# API Configuration
+VITE_API_BASE_URL=http://localhost:5000/api/v1
+VITE_SOCKET_URL=http://localhost:5000
+
+# Application
+VITE_APP_NAME=Livestream Betting Platform
+VITE_APP_VERSION=1.0.0
+
+# Features
+VITE_ENABLE_CHAT=true
+VITE_ENABLE_NOTIFICATIONS=true
+
+# Default Stream URL (fallback)
+VITE_DEFAULT_STREAM_URL=https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
+
+File 7: frontend/.env
+VITE_API_BASE_URL=http://localhost:5000/api/v1
+VITE_SOCKET_URL=http://localhost:5000
+VITE_APP_NAME=Livestream Betting Platform
+VITE_APP_VERSION=1.0.0
+VITE_ENABLE_CHAT=true
+VITE_ENABLE_NOTIFICATIONS=true
+VITE_DEFAULT_STREAM_URL=https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
+
+🎯 PHASE 2: CORE CONFIGURATION & UTILITIES
+File 8: frontend/src/main.js
+import { createApp } from 'vue'
+import { createPinia } from 'pinia'
+import router from './router'
+import App from './App.vue'
+import Toast from 'vue-toastification'
+
+// Styles
+import './assets/styles/main.css'
+import 'vue-toastification/dist/index.css'
+
+// Create app instance
+const app = createApp(App)
+
+// Pinia store
+const pinia = createPinia()
+app.use(pinia)
+
+// Router
+app.use(router)
+
+// Toast notifications
+app.use(Toast, {
+  position: 'top-right',
+  timeout: 3000,
+  closeOnClick: true,
+  pauseOnFocusLoss: true,
+  pauseOnHover: true,
+  draggable: true,
+  draggablePercent: 0.6,
+  showCloseButtonOnHover: false,
+  hideProgressBar: false,
+  closeButton: 'button',
+  icon: true,
+  rtl: false,
+  transition: 'Vue-Toastification__bounce',
+  maxToasts: 3,
+  newestOnTop: true
+})
+
+// Global error handler
+app.config.errorHandler = (err, instance, info) => {
+  console.error('Global error:', err)
+  console.log('Error info:', info)
+}
+
+// Mount app
+app.mount('#app')
+
+File 9: frontend/src/assets/styles/main.css
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-dark-900;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-dark-700 rounded-lg;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-dark-600;
+}
+
+/* Base styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  @apply bg-dark-950 text-gray-100 font-sans antialiased;
+  overflow-x: hidden;
+}
+
+/* Custom animations */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.skeleton {
+  animation: shimmer 2s infinite linear;
+  background: linear-gradient(
+    90deg,
+    #1f2937 0%,
+    #374151 50%,
+    #1f2937 100%
+  );
+  background-size: 1000px 100%;
+}
+
+/* Gradient text */
+.gradient-text {
+  @apply bg-gradient-to-r from-yellow-400 via-yellow-500 to-orange-500 bg-clip-text text-transparent;
+}
+
+/* Glass morphism */
+.glass {
+  background: rgba(31, 41, 55, 0.7);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Button styles */
+.btn {
+  @apply px-4 py-2 rounded-lg font-semibold transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.btn-primary {
+  @apply bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white shadow-lg hover:shadow-glow;
+}
+
+.btn-secondary {
+  @apply bg-dark-800 hover:bg-dark-700 text-gray-100 border border-dark-600;
+}
+
+.btn-danger {
+  @apply bg-red-600 hover:bg-red-700 text-white;
+}
+
+.btn-success {
+  @apply bg-green-600 hover:bg-green-700 text-white;
+}
+
+/* Input styles */
+.input {
+  @apply w-full bg-dark-800 border border-dark-600 rounded-lg px-4 py-3 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent transition-all;
+}
+
+/* Card styles */
+.card {
+  @apply bg-dark-900 border border-dark-700 rounded-lg p-4 shadow-lg;
+}
+
+.card-hover {
+  @apply card hover:border-yellow-500 hover:shadow-glow transition-all duration-300 cursor-pointer;
+}
+
+/* Badge styles */
+.badge {
+  @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold;
+}
+
+.badge-success {
+  @apply bg-green-900 text-green-300 border border-green-700;
+}
+
+.badge-warning {
+  @apply bg-yellow-900 text-yellow-300 border border-yellow-700;
+}
+
+.badge-danger {
+  @apply bg-red-900 text-red-300 border border-red-700;
+}
+
+.badge-info {
+  @apply bg-blue-900 text-blue-300 border border-blue-700;
+}
+
+/* Live indicator */
+.live-indicator {
+  @apply flex items-center gap-2 bg-red-600 text-white px-3 py-1 rounded-full text-sm font-bold;
+}
+
+.live-dot {
+  @apply w-2 h-2 bg-white rounded-full animate-pulse;
+}
+
+/* Loading spinner */
+.spinner {
+  @apply inline-block w-6 h-6 border-4 border-gray-600 border-t-yellow-500 rounded-full animate-spin;
+}
+
+/* Transitions */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.slide-enter-active,
+.slide-leave-active {
+  transition: transform 0.3s ease;
+}
+
+.slide-enter-from {
+  transform: translateX(-100%);
+}
+
+.slide-leave-to {
+  transform: translateX(100%);
+}
+
+/* Video player custom styles */
+.video-container {
+  @apply relative w-full bg-black rounded-lg overflow-hidden;
+  aspect-ratio: 16 / 9;
+}
+
+.video-overlay {
+  @apply absolute top-0 left-0 w-full h-full pointer-events-none z-10;
+}
+
+/* Chat styles */
+.chat-container {
+  @apply flex flex-col h-full bg-dark-900 rounded-lg;
+}
+
+.chat-messages {
+  @apply flex-1 overflow-y-auto p-4 space-y-2;
+}
+
+.chat-message {
+  @apply p-2 rounded-lg bg-dark-800;
+}
+
+.chat-input {
+  @apply border-t border-dark-700 p-3;
+}
+
+/* Responsive utilities */
+@media (max-width: 768px) {
+  .mobile-hide {
+    display: none;
+  }
+}
+
+/* Custom toast styles */
+.Vue-Toastification__toast {
+  @apply bg-dark-800 border border-dark-600 text-gray-100;
+}
+
+.Vue-Toastification__toast--success {
+  @apply border-green-500;
+}
+
+.Vue-Toastification__toast--error {
+  @apply border-red-500;
+}
+
+.Vue-Toastification__toast--warning {
+  @apply border-yellow-500;
+}
+
+.Vue-Toastification__toast--info {
+  @apply border-blue-500;
+}
+
+/* Print styles */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}
+
+File 10: frontend/src/config/api.js
+import axios from 'axios'
+import { useAuthStore } from '@/stores/auth'
+import router from '@/router'
+import { useToast } from 'vue-toastification'
+
+const toast = useToast()
+
+// Create axios instance
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL,
+  timeout: 30000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+})
+
+// Request interceptor
+api.interceptors.request.use(
+  (config) => {
+    const authStore = useAuthStore()
+    
+    // Add auth token if available
+    if (authStore.token) {
+      config.headers.Authorization = `Bearer ${authStore.token}`
+    }
+    
+    return config
+  },
+  (error) => {
+    return Promise.reject(error)
+  }
+)
+
+// Response interceptor
+api.interceptors.response.use(
+  (response) => {
+    return response
+  },
+  async (error) => {
+    const authStore = useAuthStore()
+    
+    if (error.response) {
+      const { status, data } = error.response
+      
+      switch (status) {
+        case 401:
+          // Unauthorized - try to refresh token
+          if (!error.config._retry && authStore.refreshToken) {
+            error.config._retry = true
+            
+            try {
+              const newToken = await authStore.refreshAccessToken()
+              error.config.headers.Authorization = `Bearer ${newToken}`
+              return api.request(error.config)
+            } catch (refreshError) {
+              // Refresh failed - logout
+              authStore.logout()
+              router.push('/login')
+              toast.error('Session expired. Please login again.')
+            }
+          } else {
+            authStore.logout()
+            router.push('/login')
+            toast.error('Unauthorized access')
+          }
+          break
+          
+        case 403:
+          toast.error('Access forbidden')
+          break
+          
+        case 404:
+          toast.error('Resource not found')
+          break
+          
+        case 429:
+          toast.error('Too many requests. Please slow down.')
+          break
+          
+        case 500:
+          toast.error('Server error. Please try again later.')
+          break
+          
+        default:
+          toast.error(data.error || 'An error occurred')
+      }
+    } else if (error.request) {
+      toast.error('Network error. Please check your connection.')
+    } else {
+      toast.error('An unexpected error occurred')
+    }
+    
+    return Promise.reject(error)
+  }
+)
+
+export default api
+File 11: frontend/src/config/socket.js
+import { io } from 'socket.io-client'
+import { useAuthStore } from '@/stores/auth'
+
+class SocketService {
+  constructor() {
+    this.socket = null
+    this.connected = false
+  }
+  
+  connect() {
+    const authStore = useAuthStore()
+    
+    if (this.socket?.connected) {
+      return this.socket
+    }
+    
+    this.socket = io(import.meta.env.VITE_SOCKET_URL, {
+      auth: {
+        token: authStore.token || null
+      },
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      reconnectionAttempts: 5,
+    })
+    
+    this.socket.on('connect', () => {
+      console.log('✅ Socket connected:', this.socket.id)
+      this.connected = true
+    })
+    
+    this.socket.on('disconnect', (reason) => {
+      console.log('❌ Socket disconnected:', reason)
+      this.connected = false
+    })
+    
+    this.socket.on('connect_error', (error) => {
+      console.error('Socket connection error:', error)
+    })
+    
+    this.socket.on('error', (error) => {
+      console.error('Socket error:', error)
+    })
+    
+    return this.socket
+  }
+  
+  disconnect() {
+    if (this.socket) {
+      this.socket.disconnect()
+      this.socket = null
+      this.connected = false
+    }
+  }
+  
+  emit(event, data) {
+    if (this.socket?.connected) {
+      this.socket.emit(event, data)
+    }
+  }
+  
+  on(event, callback) {
+    if (this.socket) {
+      this.socket.on(event, callback)
+    }
+  }
+  
+  off(event, callback) {
+    if (this.socket) {
+      this.socket.off(event, callback)
+    }
+  }
+  
+  joinMatch(matchId) {
+    this.emit('join-match', matchId)
+  }
+  
+  leaveMatch(matchId) {
+    this.emit('leave-match', matchId)
+  }
+  
+  sendChatMessage(matchId, message) {
+    this.emit('chat-message', { matchId, message })
+  }
+}
+
+export default new SocketService()
+File 12: frontend/src/utils/helpers.js
+import dayjs from 'dayjs'
+import relativeTime from 'dayjs/plugin/relativeTime'
+import duration from 'dayjs/plugin/duration'
+
+dayjs.extend(relativeTime)
+dayjs.extend(duration)
+
+// Format currency
+export const formatCurrency = (amount, currency = 'KHR') => {
+  if (currency === 'KHR') {
+    return new Intl.NumberFormat('km-KH', {
+      style: 'decimal',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }).format(amount) + ' ៛'
+  }
+  
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: currency
+  }).format(amount)
+}
+
+// Format number with K, M, B suffix
+export const formatNumber = (num) => {
+  if (num >= 1000000000) {
+    return (num / 1000000000).toFixed(1) + 'B'
+  }
+  if (num >= 1000000) {
+    return (num / 1000000).toFixed(1) + 'M'
+  }
+  if (num >= 1000) {
+    return (num / 1000).toFixed(1) + 'K'
+  }
+  return num.toString()
+}
+
+// Format date
+export const formatDate = (date, format = 'MMM DD, YYYY HH:mm') => {
+  return dayjs(date).format(format)
+}
+
+// Relative time (e.g., "2 hours ago")
+export const relativeTime = (date) => {
+  return dayjs(date).fromNow()
+}
+
+// Time until (e.g., "in 2 hours")
+export const timeUntil = (date) => {
+  return dayjs(date).toNow()
+}
+
+// Calculate duration
+export const calculateDuration = (start, end) => {
+  const diff = dayjs(end).diff(dayjs(start))
+  const duration = dayjs.duration(diff)
+  
+  const hours = Math.floor(duration.asHours())
+  const minutes = duration.minutes()
+  
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`
+  }
+  return `${minutes}m`
+}
+
+// Truncate text
+export const truncate = (text, length = 50) => {
+  if (!text) return ''
+  if (text.length <= length) return text
+  return text.substring(0, length) + '...'
+}
+
+// Debounce function
+export const debounce = (func, wait = 300) => {
+  let timeout
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout)
+      func(...args)
+    }
+    clearTimeout(timeout)
+    timeout = setTimeout(later, wait)
+  }
+}
+
+// Throttle function
+export const throttle = (func, limit = 1000) => {
+  let inThrottle
+  return function(...args) {
+    if (!inThrottle) {
+      func.apply(this, args)
+      inThrottle = true
+      setTimeout(() => inThrottle = false, limit)
+    }
+  }
+}
+
+// Copy to clipboard
+export const copyToClipboard = async (text) => {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch (error) {
+    console.error('Copy failed:', error)
+    return false
+  }
+}
+
+// Generate random ID
+export const generateId = () => {
+  return Math.random().toString(36).substring(2, 15)
+}
+
+// Validate email
+export const isValidEmail = (email) => {
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  return re.test(email)
+}
+
+// Validate phone number (Cambodian format)
+export const isValidPhone = (phone) => {
+  const re = /^(0|\+855)[1-9]\d{7,8}$/
+  return re.test(phone)
+}
+
+// Get bet status color
+export const getBetStatusColor = (status) => {
+  const colors = {
+    pending: 'text-yellow-400',
+    won: 'text-green-400',
+    lost: 'text-red-400',
+    cancelled: 'text-gray-400',
+    refunded: 'text-blue-400'
+  }
+  return colors[status] || 'text-gray-400'
+}
+
+// Get bet status badge class
+export const getBetStatusBadge = (status) => {
+  const badges = {
+    pending: 'badge-warning',
+    won: 'badge-success',
+    lost: 'badge-danger',
+    cancelled: 'badge-info',
+    refunded: 'badge-info'
+  }
+  return badges[status] || 'badge-info'
+}
+
+// Get match status color
+export const getMatchStatusColor = (status) => {
+  const colors = {
+    scheduled: 'text-blue-400',
+    live: 'text-red-400',
+    paused: 'text-yellow-400',
+    finished: 'text-gray-400',
+    cancelled: 'text-gray-500'
+  }
+  return colors[status] || 'text-gray-400'
+}
+
+// Local storage helpers
+export const storage = {
+  get(key) {
+    try {
+      const item = localStorage.getItem(key)
+      return item ? JSON.parse(item) : null
+    } catch (error) {
+      console.error('Storage get error:', error)
+      return null
+    }
+  },
+  
+  set(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value))
+      return true
+    } catch (error) {
+      console.error('Storage set error:', error)
+      return false
+    }
+  },
+  
+  remove(key) {
+    try {
+      localStorage.removeItem(key)
+      return true
+    } catch (error) {
+      console.error('Storage remove error:', error)
+      return false
+    }
+  },
+  
+  clear() {
+    try {
+      localStorage.clear()
+      return true
+    } catch (error) {
+      console.error('Storage clear error:', error)
+      return false
+    }
+  }
+}
+
+// Calculate potential win
+export const calculatePotentialWin = (amount, odds) => {
+  return Math.floor(amount * odds)
+}
+
+// Format odds
+export const formatOdds = (odds) => {
+  return odds.toFixed(2) + 'x'
+}
+
+// Check if match is live
+export const isMatchLive = (match) => {
+  return match.status === 'live'
+}
+
+// Check if betting is allowed
+export const isBettingAllowed = (match) => {
+  return match.status === 'live' || match.status === 'scheduled'
+}
+
+// Get category icon
+export const getCategoryIcon = (category) => {
+  const icons = {
+    sports: '⚽',
+    esports: '🎮',
+    casino: '🎰',
+    lottery: '🎫',
+    other: '🎯'
+  }
+  return icons[category] || '🎯'
+}
+
+// Calculate win rate percentage
+export const calculateWinRate = (won, total) => {
+  if (total === 0) return 0
+  return ((won / total) * 100).toFixed(1)
+}
+
+// Group items by date
+export const groupByDate = (items, dateKey = 'createdAt') => {
+  const groups = {}
+  
+  items.forEach(item => {
+    const date = dayjs(item[dateKey]).format('YYYY-MM-DD')
+    if (!groups[date]) {
+      groups[date] = []
+    }
+    groups[date].push(item)
+  })
+  
+  return groups
+}
+
+export default {
+  formatCurrency,
+  formatNumber,
+  formatDate,
+  relativeTime,
+  timeUntil,
+  calculateDuration,
+  truncate,
+  debounce,
+  throttle,
+  copyToClipboard,
+  generateId,
+  isValidEmail,
+  isValidPhone,
+  getBetStatusColor,
+  getBetStatusBadge,
+  getMatchStatusColor,
+  storage,
+  calculatePotentialWin,
+  formatOdds,
+  isMatchLive,
+  isBettingAllowed,
+  getCategoryIcon,
+  calculateWinRate,
+  groupByDate
+}
+📦 PHASE 3: PINIA STORES (STATE MANAGEMENT)
+File 13: frontend/src/stores/auth.js
+import { defineStore } from 'pinia'
+import api from '@/config/api'
+import { storage } from '@/utils/helpers'
+import socketService from '@/config/socket'
+
+export const useAuthStore = defineStore('auth', {
+  state: () => ({
+    user: storage.get('user') || null,
+    token: storage.get('token') || null,
+    refreshToken: storage.get('refreshToken') || null,
+    isAuthenticated: !!storage.get('token'),
+    loading: false,
+  }),
+
+  getters: {
+    isAdmin: (state) => state.user?.role === 'admin',
+    isModerator: (state) => ['admin', 'moderator'].includes(state.user?.role),
+    username: (state) => state.user?.username || 'Guest',
+    userAvatar: (state) => state.user?.avatar || 'https://ui-avatars.com/api/?name=User',
+    balance: (state) => state.user?.wallet?.balance || 0,
+    currency: (state) => state.user?.wallet?.currency || 'KHR',
+  },
+
+  actions: {
+    // Register new user
+    async register(userData) {
+      try {
+        this.loading = true
+        const { data } = await api.post('/auth/register', userData)
+        
+        this.setAuthData(data)
+        socketService.connect()
+        
+        return { success: true, user: data.user }
+      } catch (error) {
+        console.error('Register error:', error)
+        return { 
+          success: false, 
+          error: error.response?.data?.error || 'Registration failed' 
+        }
+      } finally {
+        this.loading = false
+      }
+    },
+
+    // Login user
+    async login(credentials) {
+      try {
+        this.loading = true
+        const { data } = await api.post('/auth/login', credentials)
+        
+        this.setAuthData(data)
+        socketService.connect()
+        
+        return { success: true, user: data.user }
+      } catch (error) {
+        console.error('Login error:', error)
+        return { 
+          success: false, 
+          error: error.response?.data?.error || 'Login failed' 
+        }
+      } finally {
+        this.loading = false
+      }
+    },
+
+    // Logout user
+    async logout() {
+      try {
+        if (this.token) {
+          await api.post('/auth/logout', {
+            refreshToken: this.refreshToken
+          })
+        }
+      } catch (error) {
+        console.error('Logout error:', error)
+      } finally {
+        this.clearAuthData()
+        socketService.disconnect()
+      }
+    },
+
+    // Refresh access token
+    async refreshAccessToken() {
+      try {
+        const { data } = await api.post('/auth/refresh-token', {
+          refreshToken: this.refreshToken
+        })
+        
+        this.token = data.accessToken
+        storage.set('token', data.accessToken)
+        
+        return data.accessToken
+      } catch (error) {
+        console.error('Refresh token error:', error)
+        this.clearAuthData()
+        throw error
+      }
+    },
+
+    // Get user profile
+    async fetchProfile() {
+      try {
+        const { data } = await api.get('/auth/profile')
+        this.user = data.user
+        storage.set('user', data.user)
+        return data.user
+      } catch (error) {
+        console.error('Fetch profile error:', error)
+        return null
+      }
+    },
+
+    // Update user profile
+    async updateProfile(profileData) {
+      try {
+        const { data } = await api.put('/auth/profile', profileData)
+        this.user = data.user
+        storage.set('user', data.user)
+        return { success: true, user: data.user }
+      } catch (error) {
+        console.error('Update profile error:', error)
+        return { 
+          success: false, 
+          error: error.response?.data?.error || 'Update failed' 
+        }
+      }
+    },
+
+    // Change password
+    async changePassword(passwordData) {
+      try {
+        await api.post('/auth/change-password', passwordData)
+        return { success: true }
+      } catch (error) {
+        console.error('Change password error:', error)
+        return { 
+          success: false, 
+          error: error.response?.data?.error || 'Password change failed' 
+        }
+      }
+    },
+
+    // Set authentication data
+    setAuthData(data) {
+      this.user = data.user
+      this.token = data.tokens.accessToken
+      this.refreshToken = data.tokens.refreshToken
+      this.isAuthenticated = true
+
+      storage.set('user', data.user)
+      storage.set('token', data.tokens.accessToken)
+      storage.set('refreshToken', data.tokens.refreshToken)
+    },
+
+    // Clear authentication data
+    clearAuthData() {
+      this.user = null
+      this.token = null
+      this.refreshToken = null
+      this.isAuthenticated = false
+
+      storage.remove('user')
+      storage.remove('token')
+      storage.remove('refreshToken')
+    },
+
+    // Update wallet balance
+    updateBalance(newBalance) {
+      if (this.user) {
+        this.user.wallet.balance = newBalance
+        storage.set('user', this.user)
+      }
+    },
+  },
+})
+File 14: frontend/src/stores/match.js
+
+import { defineStore } from 'pinia'
+import api from '@/config/api'
+import socketService from '@/config/socket'
+
+export const useMatchStore = defineStore('match', {
+  state: () => ({
+    matches: [],
+    liveMatches: [],
+    upcomingMatches: [],
+    currentMatch: null,
+    loading: false,
+    error: null,
+    viewerCounts: {},
+  }),
+
+  getters: {
+    getLiveMatches: (state) => state.liveMatches,
+    getUpcomingMatches: (state) => state.upcomingMatches,
+    getFeaturedMatches: (state) => state.matches.filter(m => m.isFeatured),
+    getMatchById: (state) => (id) => state.matches.find(m => m._id === id),
+    
+    getCurrentMatchViewers: (state) => {
+      if (!state.currentMatch) return 0
+      return state.viewerCounts[state.currentMatch._id] || state.currentMatch.stats?.currentViewers || 0
+    },
+  },
+
+  actions: {
+    // Fetch all matches with filters
+    async fetchMatches(filters = {}) {
+      try {
+        this.loading = true
+        const { data } = await api.get('/matches', { params: filters })
+        this.matches = data.matches
+        return data
+      } catch (error) {
+        console.error('Fetch matches error:', error)
+        this.error = error.message
+        return null
+      } finally {
+        this.loading = false
+      }
+    },
+
+    // Fetch live matches
+    async fetchLiveMatches() {
+      try {
+        const { data } = await api.get('/matches/live')
+        this.liveMatches = data.matches
+        return data.matches
+      } catch (error) {
+        console.error('Fetch live matches error:', error)
+        return []
+      }
+    },
+
+    // Fetch upcoming matches
+    async fetchUpcomingMatches() {
+      try {
+        const { data } = await api.get('/matches/upcoming')
+        this.upcomingMatches = data.matches
+        return data.matches
+      } catch (error) {
+        console.error('Fetch upcoming matches error:', error)
+        return []
+      }
+    },
+
+    // Fetch single match
+    async fetchMatch(id) {
+      try {
+        this.loading = true
+        const { data } = await api.get(`/matches/${id}`)
+        this.currentMatch = data.match
+        return data.match
+      } catch (error) {
+        console.error('Fetch match error:', error)
+        this.error = error.message
+        return null
+      } finally {
+        this.loading = false
+      }
+    },
+
+    // Join match room (socket)
+    joinMatchRoom(matchId) {
+      socketService.joinMatch(matchId)
+      this.setupMatchListeners(matchId)
+    },
+
+    // Leave match room (socket)
+    leaveMatchRoom(matchId) {
+      socketService.leaveMatch(matchId)
+      this.removeMatchListeners()
+    },
+
+    // Setup socket listeners for match
+    setupMatchListeners(matchId) {
+      // Viewer count updated
+      socketService.on('viewer-count-updated', (data) => {
+        if (data.matchId === matchId) {
+          this.viewerCounts[matchId] = data.viewerCount
+          
+          if (this.currentMatch?._id === matchId) {
+            this.currentMatch.stats.currentViewers = data.viewerCount
+          }
+        }
+      })
+
+      // Odds updated
+      socketService.on('odds-updated', (data) => {
+        if (data.matchId === matchId && this.currentMatch?._id === matchId) {
+          this.currentMatch.bettingOptions = data.bettingOptions
+        }
+      })
+
+      // Match updated
+      socketService.on('match-updated', (match) => {
+        if (match._id === matchId) {
+          this.currentMatch = match
+        }
+      })
+
+      // Match started
+      socketService.on('match-started', (data) => {
+        if (data.matchId === matchId) {
+          this.currentMatch = data.match
+        }
+      })
+
+      // Match ended
+      socketService.on('match-ended', (data) => {
+        if (data.matchId === matchId && this.currentMatch) {
+          this.currentMatch.status = 'finished'
+          this.currentMatch.result = data.result
+        }
+      })
+
+      // Match stats updated
+      socketService.on('match-stats-updated', (data) => {
+        if (data.matchId === matchId && this.currentMatch) {
+          this.currentMatch.stats = data.stats
+        }
+      })
+    },
+
+    // Remove socket listeners
+    removeMatchListeners() {
+      socketService.off('viewer-count-updated')
+      socketService.off('odds-updated')
+      socketService.off('match-updated')
+      socketService.off('match-started')
+      socketService.off('match-ended')
+      socketService.off('match-stats-updated')
+    },
+
+    // Update match odds locally (real-time)
+    updateMatchOdds(matchId, bettingOptions) {
+      if (this.currentMatch?._id === matchId) {
+        this.currentMatch.bettingOptions = bettingOptions
+      }
+      
+      const matchIndex = this.matches.findIndex(m => m._id === matchId)
+      if (matchIndex !== -1) {
+        this.matches[matchIndex].bettingOptions = bettingOptions
+      }
+    },
+
+    // Clear current match
+    clearCurrentMatch() {
+      if (this.currentMatch) {
+        this.leaveMatchRoom(this.currentMatch._id)
+      }
+      this.currentMatch = null
+    },
+  },
+})
+
+File 15: frontend/src/stores/bet.js
+import { defineStore } from 'pinia'
+import api from '@/config/api'
+import { useAuthStore } from './auth'
+import { useToast } from 'vue-toastification'
+
+const toast = useToast()
+
+export const useBetStore = defineStore('bet', {
+  state: () => ({
+    activeBets: [],
+    betHistory: [],
+    betStats: null,
+    loading: false,
+    placingBet: false,
+  }),
+
+  getters: {
+    pendingBets: (state) => state.activeBets.filter(b => b.status === 'pending'),
+    totalPendingAmount: (state) => {
+      return state.activeBets
+        .filter(b => b.status === 'pending')
+        .reduce((sum, b) => sum + b.amount, 0)
+    },
+    totalPotentialWin: (state) => {
+      return state.activeBets
+        .filter(b => b.status === 'pending')
+        .reduce((sum, b) => sum + b.potentialWin, 0)
+    },
+    winRate: (state) => {
+      if (!state.betStats) return 0
+      return state.betStats.winRate || 0
+    },
+  },
+
+  actions: {
+    // Place a bet
+    async placeBet(betData) {
+      try {
+        this.placingBet = true
+        const authStore = useAuthStore()
+
+        const { data } = await api.post('/bets/place', betData)
+        
+        // Update local state
+        this.activeBets.unshift(data.bet)
+        
+        // Update user balance
+        authStore.updateBalance(data.wallet.balance)
+        
+        toast.success('Bet placed successfully!')
+        return { success: true, bet: data.bet }
+      } catch (error) {
+        console.error('Place bet error:', error)
+        const errorMsg = error.response?.data?.error || 'Failed to place bet'
+        toast.error(errorMsg)
+        return { success: false, error: errorMsg }
+      } finally {
+        this.placingBet = false
+      }
+    },
+
+    // Fetch active bets
+    async fetchActiveBets() {
+      try {
+        const { data } = await api.get('/bets/active')
+        this.activeBets = data.bets
+        return data.bets
+      } catch (error) {
+        console.error('Fetch active bets error:', error)
+        return []
+      }
+    },
+
+    // Fetch bet history
+    async fetchBetHistory(params = {}) {
+      try {
+        this.loading = true
+        const { data } = await api.get('/bets/history', { params })
+        this.betHistory = data.bets
+        return data
+      } catch (error) {
+        console.error('Fetch bet history error:', error)
+        return null
+      } finally {
+        this.loading = false
+      }
+    },
+
+    // Fetch bet statistics
+    async fetchBetStats() {
+      try {
+        const { data } = await api.get('/bets/stats')
+        this.betStats = data.stats
+        return data.stats
+      } catch (error) {
+        console.error('Fetch bet stats error:', error)
+        return null
+      }
+    },
+
+    // Cancel a bet
+    async cancelBet(betId) {
+      try {
+        const { data } = await api.delete(`/bets/${betId}/cancel`)
+        
+        // Update local state
+        const betIndex = this.activeBets.findIndex(b => b._id === betId)
+        if (betIndex !== -1) {
+          this.activeBets[betIndex].status = 'cancelled'
+        }
+        
+        // Update user balance
+        const authStore = useAuthStore()
+        authStore.updateBalance(data.newBalance)
+        
+        toast.success('Bet cancelled successfully!')
+        return { success: true }
+      } catch (error) {
+        console.error('Cancel bet error:', error)
+        const errorMsg = error.response?.data?.error || 'Failed to cancel bet'
+        toast.error(errorMsg)
+        return { success: false, error: errorMsg }
+      }
+    },
+
+    // Listen for bet result (socket)
+    setupBetListeners(socketService) {
+      socketService.on('bet-result', (data) => {
+        const betIndex = this.activeBets.findIndex(b => b._id === data.betId)
+        if (betIndex !== -1) {
+          this.activeBets[betIndex].status = data.status
+          this.activeBets[betIndex].actualWin = data.winAmount
+          
+          if (data.status === 'won') {
+            toast.success(`You won ${data.winAmount}!`)
+          } else if (data.status === 'lost') {
+            toast.error('Bet lost')
+          }
+        }
+        
+        // Refresh stats
+        this.fetchBetStats()
+      })
+    },
+
+    // Clear bet data
+    clearBets() {
+      this.activeBets = []
+      this.betHistory = []
+      this.betStats = null
+    },
+  },
+})
+
+File 17: frontend/src/stores/chat.js
+
+import { defineStore } from 'pinia'
+import socketService from '@/config/socket'
+
+export const useChatStore = defineStore('chat', {
+  state: () => ({
+    messages: [],
+    connected: false,
+    currentMatchId: null,
+  }),
+
+  getters: {
+    getMessages: (state) => state.messages,
+    isConnected: (state) => state.connected,
+  },
+
+  actions: {
+    // Initialize chat for match
+    initChat(matchId) {
+      this.currentMatchId = matchId
+      this.messages = []
+      this.setupChatListeners()
+    },
+
+    // Send chat message
+    sendMessage(message) {
+      if (!this.currentMatchId || !message.trim()) return
+      
+      socketService.sendChatMessage(this.currentMatchId, message)
+    },
+
+    // Setup socket listeners
+    setupChatListeners() {
+      socketService.on('new-chat-message', (message) => {
+        this.messages.push(message)
+        
+        // Keep only last 100 messages
+        if (this.messages.length > 100) {
+          this.messages.shift()
+        }
+      })
+
+      socketService.on('connect', () => {
+        this.connected = true
+      })
+
+      socketService.on('disconnect', () => {
+        this.connected = false
+      })
+    },
+
+    // Clear chat
+    clearChat() {
+      this.messages = []
+      this.currentMatchId = null
+    },
+  },
+})
+
+🛣️ PHASE 4: VUE ROUTER
+File 19: frontend/src/router/index.js
+import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
+
+// Layouts
+import MainLayout from '@/layouts/MainLayout.vue'
+import AuthLayout from '@/layouts/AuthLayout.vue'
+
+// Pages
+import Home from '@/pages/Home.vue'
+import Login from '@/pages/Login.vue'
+import Register from '@/pages/Register.vue'
+import LivestreamPage from '@/pages/LivestreamPage.vue'
+import Matches from '@/pages/Matches.vue'
+import Profile from '@/pages/Profile.vue'
+import Wallet from '@/pages/Wallet.vue'
+import BetHistory from '@/pages/BetHistory.vue'
+import NotFound from '@/pages/NotFound.vue'
+
+const routes = [
+  {
+    path: '/',
+    component: MainLayout,
+    children: [
+      {
+        path: '',
+        name: 'Home',
+        component: Home,
+        meta: { title: 'Home' }
+      },
+      {
+        path: 'matches',
+        name: 'Matches',
+        component: Matches,
+        meta: { title: 'All Matches' }
+      },
+      {
+        path: 'live/:id',
+        name: 'Livestream',
+        component: LivestreamPage,
+        meta: { title: 'Live Match', requiresAuth: false }
+      },
+      {
+        path: 'profile',
+        name: 'Profile',
+        component: Profile,
+        meta: { title: 'Profile', requiresAuth: true }
+      },
+      {
+        path: 'wallet',
+        name: 'Wallet',
+        component: Wallet,
+        meta: { title: 'Wallet', requiresAuth: true }
+      },
+      {
+        path: 'bets',
+        name: 'BetHistory',
+        component: BetHistory,
+        meta: { title: 'Bet History', requiresAuth: true }
+      },
+    ]
+  },
+  {
+    path: '/auth',
+    component: AuthLayout,
+    children: [
+      {
+        path: 'login',
+        name: 'Login',
+        component: Login,
+        meta: { title: 'Login', guest: true }
+      },
+      {
+        path: 'register',
+        name: 'Register',
+        component: Register,
+        meta: { title: 'Register', guest: true }
+      },
+    ]
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'NotFound',
+    component: NotFound,
+    meta: { title: '404 Not Found' }
+  }
+]
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes,
+  scrollBehavior(to, from, savedPosition) {
+    if (savedPosition) {
+      return savedPosition
+    } else {
+      return { top: 0 }
+    }
+  }
+})
+
+// Navigation guards
+router.beforeEach((to, from, next) => {
+  const authStore = useAuthStore()
+  
+  // Set page title
+  document.title = to.meta.title 
+    ? `${to.meta.title} - ${import.meta.env.VITE_APP_NAME}`
+    : import.meta.env.VITE_APP_NAME
+
+  // Check authentication
+  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
+    next({ name: 'Login', query: { redirect: to.fullPath } })
+  } else if (to.meta.guest && authStore.isAuthenticated) {
+    next({ name: 'Home' })
+  } else {
+    next()
+  }
+})
+
+export default router
+

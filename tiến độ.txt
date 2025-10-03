@@ -1,0 +1,75 @@
+✅ KIỂM TRA THEO DỰ ÁN BẠN ĐÃ CHO
+Nhìn lại file TEMPLATE.md của bạn:
+frontend/src/
+├── assets/          # ✅ Icon, ảnh nền (đã có trong main.css)
+├── components/      # ⏳ Sẽ làm tiếp (Navbar, LivestreamPlayer, BetButton)
+├── layouts/         # ⏳ Sẽ làm tiếp (Template layout)
+├── pages/           # ⏳ Sẽ làm tiếp (Home, Livestream, Profile, Login)
+├── router/          # ⏳ Sẽ làm tiếp (Vue Router)
+├── store/           # ⏳ Sẽ làm tiếp (Pinia - quản lý state)
+└── utils/           # ✅ ĐÃ LÀM (helpers.js - hàm tiện ích)
+📊 Tiến độ hiện tại:
+✅ ĐÃ HOÀN THÀNH:
+
+Setup project (Vite, Vue 3, Tailwind)
+Configuration (API, Socket, Environment)
+Utils/Helpers (các hàm hỗ trợ)
+CSS/Styles (Tailwind custom)
+
+⏳ SẼ LÀM TIẾP:
+
+Stores - Quản lý dữ liệu (auth, matches, bets, wallet)
+Router - Định tuyến trang
+Components - UI components tái sử dụng
+Pages - Các trang chính
+
+
+🎯 SO SÁNH VỚI WEBSITE MẪU (dv6666.net)
+Dựa trên website mẫu, tôi cần làm:
+Trang chủ:
+
+✅ Danh sách trận đấu đang live
+✅ Trận sắp diễn ra
+✅ Banner quảng cáo
+✅ Menu navigation
+
+Trang Livestream:
+
+✅ Video player (HLS streaming)
+✅ Panel đặt cược bên cạnh
+✅ Tỷ lệ cược realtime
+✅ Chat box
+✅ Thống kê trận đấu
+
+Trang Profile:
+
+✅ Thông tin user
+✅ Số dư ví
+✅ Lịch sử cược
+✅ Thống kê win/loss
+
+Trang Wallet:
+
+✅ Nạp tiền
+✅ Rút tiền
+✅ Lịch sử giao dịch
+
+🚀 ĐỀ XUẤT CỦA TÔI:
+Làm theo thứ tự 1-2-3-4 NHƯNG ưu tiên các tính năng QUAN TRỌNG:
+Phase 1: Cơ bản (30 phút)
+
+✅ Stores (auth, matches)
+✅ Router cơ bản
+✅ Components thiết yếu (Navbar, Loading)
+
+Phase 2: Core Features (1 giờ)
+
+✅ Trang Login/Register
+✅ Trang Home (danh sách matches)
+✅ Trang Livestream + Betting
+
+Phase 3: Advanced (30 phút)
+
+✅ Wallet & Transactions
+✅ Profile & History
+✅ Chat realtime
